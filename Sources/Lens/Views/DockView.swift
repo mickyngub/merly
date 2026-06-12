@@ -258,29 +258,45 @@ struct RailView: View {
     @State private var hovering = false
     @Environment(\.theme) private var theme
 
+    static let mascotPx: CGFloat = 28
+    static let spacing: CGFloat = 13
+    static let chevronHeight: CGFloat = 16
+    /// Padding above the chevron and below the last mascot. Kept >= the panel's
+    /// corner radius so a hover-scaled bottom mascot never clips on the corner.
+    static let vPadding: CGFloat = 16
+
+    /// Natural height for `count` providers — the rail panel is sized to this so
+    /// it stops at the last mascot instead of filling the screen.
+    static func contentHeight(providerCount count: Int) -> CGFloat {
+        let items = count + 1 // chevron + one mascot per provider
+        let itemsHeight = chevronHeight + CGFloat(count) * mascotPx
+        let gaps = CGFloat(max(items - 1, 0)) * spacing
+        return vPadding * 2 + itemsHeight + gaps
+    }
+
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: Self.spacing) {
             Image(systemName: "chevron.left")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.text2)
-                .padding(.bottom, 2)
+                .frame(height: Self.chevronHeight)
             ForEach(engine.snapshots) { snapshot in
                 MascotView(
                     style: snapshot.config.resolvedStyle,
                     palette: snapshot.config.resolvedPalette,
                     mood: snapshot.mood,
-                    px: 32,
+                    px: Self.mascotPx,
                     bob: false,
                     hopsOnHover: false,
                     spriteName: snapshot.config.resolvedSprite
                 )
+                .frame(width: Self.mascotPx, height: Self.mascotPx)
                 .scaleEffect(hovering ? 1.08 : 1)
                 .animation(.easeOut(duration: 0.2), value: hovering)
             }
-            Spacer()
         }
-        .padding(.top, 16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, Self.vPadding)
+        .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
         .onTapGesture(perform: onExpand)
         .onHover { hovering = $0 }

@@ -96,7 +96,10 @@ final class PanelController: NSObject {
     private func railFrame(onScreen: Bool) -> NSRect {
         let v = screen.visibleFrame
         let x = onScreen ? v.maxX - Self.railWidth : v.maxX - Self.railWidth + 20
-        return NSRect(x: x, y: v.minY, width: Self.railWidth, height: v.height)
+        // Only as tall as the chevron + provider mascots, anchored under the menu
+        // bar — not the full screen height.
+        let height = min(RailView.contentHeight(providerCount: engine.snapshots.count), v.height)
+        return NSRect(x: x, y: v.maxY - height, width: Self.railWidth, height: height)
     }
 
     // MARK: state transitions
