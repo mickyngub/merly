@@ -5,10 +5,15 @@
 import AppKit
 import SwiftUI
 
+/// Which screen the dock should show when it opens.
+enum PanelScreen { case dock, mascot }
+
 /// Observable bridge so SwiftUI re-runs the entrance stagger on every open.
 @MainActor
 final class PanelState: ObservableObject {
     @Published var openGeneration = 0
+    /// Screen to jump to on the next open (reset to `.dock` by the dock once shown).
+    @Published var initialScreen: PanelScreen = .dock
 }
 
 @MainActor
@@ -103,7 +108,14 @@ final class PanelController: NSObject {
         }
     }
 
-    func open() {
+    func open(screen: PanelScreen = .dock) {
+        panelState.initialScreen = screen
+        // Already visible — just re-trigger the entrance so it routes to `screen`.
+        if state == .open {
+            panelState.openGeneration += 1
+            engine.refresh()
+            return
+        }
         let fromRail = state == .rail
         state = .open
         if fromRail { hideRail() }
@@ -237,7 +249,7 @@ struct PanelRootView: View {
             bottomTrailingRadius: 0, topTrailingRadius: 0,
             style: .continuous
         )
-        DockView(engine: engine, openGeneration: panelState.openGeneration)
+        DockView(engine: engine, openGeneration: panelState.openGeneration, initialScreen: panelState.initialScreen)
         .frame(width: PanelController.panelWidth)
         .frame(maxHeight: .infinity)
         .background {

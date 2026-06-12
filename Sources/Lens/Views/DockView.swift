@@ -8,11 +8,14 @@ struct DockView: View {
     @ObservedObject var engine: UsageEngine
     /// Bumped every time the panel opens, retriggering the entrance stagger.
     let openGeneration: Int
+    /// Screen to show on open — `.mascot` jumps straight to the mascot editor.
+    let initialScreen: PanelScreen
 
     @State private var refreshSpin = 0.0
     @State private var addingProvider = false
     @State private var editing = false
     @State private var showingSettings = false
+    @State private var showingMascot = false
     @State private var editingProviderId: String?
     @State private var draggingId: String?
     @Environment(\.theme) private var theme
@@ -22,7 +25,12 @@ struct DockView: View {
             header
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 9) {
-                    if showingSettings {
+                    if showingMascot {
+                        MascotEditorView(engine: engine) {
+                            withAnimation(Theme.snappy(0.4)) { showingMascot = false }
+                        }
+                        .entrance(index: 0, generation: openGeneration)
+                    } else if showingSettings {
                         SettingsView(engine: engine) {
                             withAnimation(Theme.snappy(0.4)) { showingSettings = false }
                         }
@@ -45,6 +53,7 @@ struct DockView: View {
             editing = false
             showingSettings = false
             editingProviderId = nil
+            showingMascot = initialScreen == .mascot
         }
     }
 
@@ -100,7 +109,7 @@ struct DockView: View {
                 }
             }
             Spacer()
-            if !showingSettings, !engine.snapshots.isEmpty {
+            if !showingSettings, !showingMascot, !engine.snapshots.isEmpty {
                 IconButton(systemName: editing ? "checkmark" : "slider.horizontal.3") {
                     withAnimation(Theme.snappy(0.3)) {
                         editing.toggle()
@@ -112,7 +121,7 @@ struct DockView: View {
             IconButton(systemName: showingSettings ? "checkmark" : "gearshape") {
                 withAnimation(Theme.snappy(0.3)) {
                     showingSettings.toggle()
-                    if showingSettings { editing = false; addingProvider = false; editingProviderId = nil }
+                    if showingSettings { editing = false; addingProvider = false; editingProviderId = nil; showingMascot = false }
                 }
             }
             .help(showingSettings ? "Done" : "Settings")

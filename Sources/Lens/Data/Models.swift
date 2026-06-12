@@ -34,6 +34,32 @@ enum ProviderKind: String, Codable, CaseIterable {
         case .kimi: "purple"
         }
     }
+
+    /// Sprite sheets this kind's mascot may use — its own family only, so the
+    /// editor can't dress a Claude provider up as Codex/Kimi.
+    var spriteFamily: [(id: String, label: String)] {
+        switch self {
+        case .claude: [("clawd-sprite", "Clawd"), ("clawd-work-sprite", "Work")]
+        case .codex: [("codex-sprite", "Codex")]
+        case .kimi: [("kimi-sprite", "Kimi")]
+        }
+    }
+}
+
+/// The app's own mascot, shown in the menu bar ("topnav"). Independent of any
+/// provider; its look is user-editable while its mood tracks the busiest
+/// provider's pressure.
+struct DefaultMascot: Codable, Equatable {
+    var style: MascotStyle
+    var palette: String
+    /// Bundled sprite-sheet basename; "" renders the drawn critter instead.
+    var sprite: String
+
+    static let standard = DefaultMascot(style: .cat, palette: "coral", sprite: "clawd-sprite")
+
+    /// Sprite sheet to render, or nil when drawing the critter.
+    var resolvedSprite: String? { sprite.isEmpty ? nil : sprite }
+    var resolvedPalette: MascotPalette { MascotPalette.preset(palette) }
 }
 
 struct ProviderConfig: Codable, Identifiable, Equatable {
@@ -206,11 +232,19 @@ struct AppConfig: Codable {
     /// Optional so configs written before alerts existed still decode (a missing
     /// key would otherwise throw and wipe the user's providers back to default).
     var notifications: NotificationSettings?
+    /// Optional so older configs decode; falls back to `.standard` when absent.
+    var defaultMascot: DefaultMascot?
 
     /// Always-present view of the alert settings, defaulting when absent.
     var notificationSettings: NotificationSettings {
         get { notifications ?? NotificationSettings() }
         set { notifications = newValue }
+    }
+
+    /// Always-present view of the menu bar mascot, defaulting when absent.
+    var defaultMascotConfig: DefaultMascot {
+        get { defaultMascot ?? .standard }
+        set { defaultMascot = newValue }
     }
 
     static let `default` = AppConfig(
@@ -227,7 +261,8 @@ struct AppConfig: Codable {
             ProviderConfig(id: "kimi", name: "Kimi", account: "Moonshot",
                            kind: .kimi, dir: "~/.kimi-code", style: .round, palette: "purple"),
         ],
-        notifications: NotificationSettings()
+        notifications: NotificationSettings(),
+        defaultMascot: .standard
     )
 }
 

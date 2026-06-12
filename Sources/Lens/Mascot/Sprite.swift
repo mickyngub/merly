@@ -48,6 +48,16 @@ enum Mood: String, Comparable {
 
     /// Row index into a sprite sheet (top→bottom: happy, neutral, tired, stressed).
     var spriteRow: Int { rank }
+
+    /// Inverse of `spriteRow`, for picking expressions straight off a sheet.
+    static func fromRow(_ row: Int) -> Mood {
+        switch row {
+        case 0: .happy
+        case 1: .content
+        case 2: .tired
+        default: .stressed
+        }
+    }
 }
 
 enum MascotStyle: String, Codable {

@@ -131,6 +131,16 @@ final class UsageEngine: ObservableObject {
         appConfig = config
     }
 
+    /// Persist the menu bar's default mascot. Re-emits `snapshots` so the status
+    /// item (which observes that publisher) re-renders the new look immediately.
+    func updateDefaultMascot(_ mascot: DefaultMascot) {
+        var config = appConfig
+        config.defaultMascotConfig = mascot
+        ConfigStore.save(config)
+        appConfig = config
+        snapshots = snapshots
+    }
+
     /// Tilde-expanded, trailing-slash-stripped path for stable folder comparison.
     static func normalizedDir(_ dir: String) -> String {
         let expanded = (dir as NSString).expandingTildeInPath

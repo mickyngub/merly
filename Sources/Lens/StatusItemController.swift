@@ -20,6 +20,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// The current peak provider's look, captured for the animation timer.
     private var current: (sprite: String?, style: MascotStyle, palette: MascotPalette, mood: Mood)?
 
+    /// Short off-mood expression borrowed from another sheet row, so the menu
+    /// bar critter uses the whole 4×4 range instead of idling on one row.
+    private var emote: (row: Int, ticksLeft: Int)?
+    private var ticksUntilEmote = Int.random(in: 25...60)
+
     init(engine: UsageEngine, panel: PanelController) {
         self.engine = engine
         self.panel = panel
@@ -46,45 +51,67 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func update(with snapshots: [ProviderSnapshot]) {
         guard let button = statusItem.button else { return }
-        guard let peak = snapshots.max(by: { $0.pressurePct < $1.pressurePct }) else {
-            current = nil
-            button.image = nil
-            button.title = "—"
-            return
-        }
+        // The menu bar shows the user's editable default mascot; only its mood
+        // tracks the busiest provider's pressure (happy when there are none).
+        let mascot = engine.appConfig.defaultMascotConfig
+        let peak = snapshots.max(by: { $0.pressurePct < $1.pressurePct })
+        let mood = peak?.mood ?? .happy
         button.title = ""
-        current = (peak.config.resolvedSprite, peak.config.resolvedStyle,
-                   peak.config.resolvedPalette, peak.mood)
-        let pct = Int(peak.pressurePct.rounded())
-        button.toolTip = "\(peak.config.name) \(peak.config.account) — \(pct)% of closest limit used"
+        if mood != current?.mood { emote = nil } // real data beats a flourish
+        current = (mascot.resolvedSprite, mascot.style, mascot.resolvedPalette, mood)
+        if let peak {
+            let pct = Int(peak.pressurePct.rounded())
+            button.toolTip = "\(peak.config.name) \(peak.config.account) — \(pct)% of closest limit used"
+        } else {
+            button.toolTip = "Usage Dock"
+        }
         renderFrame()
     }
 
-    /// Cycle the peak mascot's 4 idle frames in the menu bar (~5 fps), matching the panel.
+    /// Animate the peak mascot at ~5 fps, matching the panel.
     private func startAnimation() {
         animTimer?.invalidate()
         let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.animFrame = (self.animFrame + 1) % 4
-                self.renderFrame()
-            }
+            MainActor.assumeIsolated { self?.tick() }
         }
         RunLoop.main.add(timer, forMode: .common)
         animTimer = timer
     }
 
+    /// One animation tick: advance the idle frame, and every ~5–12s play a
+    /// brief (0.8–1.6s) expression from one of the other mood rows.
+    private func tick() {
+        animFrame = (animFrame + 1) % 4
+        if var e = emote {
+            e.ticksLeft -= 1
+            if e.ticksLeft <= 0 {
+                emote = nil
+                ticksUntilEmote = Int.random(in: 25...60)
+            } else {
+                emote = e
+            }
+        } else {
+            ticksUntilEmote -= 1
+            if ticksUntilEmote <= 0, let cur = current,
+               let row = (0..<4).filter({ $0 != cur.mood.spriteRow }).randomElement() {
+                emote = (row, Int.random(in: 4...8))
+            }
+        }
+        renderFrame()
+    }
+
     private func renderFrame() {
         guard let button = statusItem.button, let cur = current else { return }
+        let row = emote?.row ?? cur.mood.spriteRow
         if let name = cur.sprite,
            let sheet = SpriteSheetStore.sheet(named: name),
-           let cg = sheet.frame(row: cur.mood.spriteRow, col: animFrame) {
+           let cg = sheet.frame(row: row, col: animFrame) {
             let img = NSImage(cgImage: cg, size: NSSize(width: iconPoints, height: iconPoints))
             img.isTemplate = false
             button.image = img
         } else {
             button.image = Self.spriteImage(style: cur.style, palette: cur.palette,
-                                            mood: cur.mood, points: iconPoints - 2)
+                                            mood: Mood.fromRow(row), points: iconPoints - 2)
         }
     }
 
@@ -100,13 +127,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
 
-        let refresh = NSMenuItem(title: "Refresh Now", action: #selector(refreshNow), keyEquivalent: "r")
-        refresh.target = self
-        menu.addItem(refresh)
-
-        let edit = NSMenuItem(title: "Edit Providers…", action: #selector(editProviders), keyEquivalent: ",")
-        edit.target = self
-        menu.addItem(edit)
+        let mascot = NSMenuItem(title: "Edit Mascot…", action: #selector(editMascot), keyEquivalent: "m")
+        mascot.target = self
+        menu.addItem(mascot)
 
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Usage Dock", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -124,9 +147,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    @objc private func refreshNow() { engine.refresh() }
-
-    @objc private func editProviders() { NSWorkspace.shared.open(AppPaths.configFile) }
+    /// Open the dock straight to the mascot editor.
+    @objc private func editMascot() { panel.open(screen: .mascot) }
 
     /// Renders the 16x16 sprite resolution-independently for the menu bar.
     static func spriteImage(style: MascotStyle, palette: MascotPalette, mood: Mood, points: CGFloat) -> NSImage {
