@@ -19,7 +19,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.appearance = NSAppearance(named: .aqua)
         }
         engine.start()
-        if CommandLine.arguments.contains("--open") {
+        if CommandLine.arguments.contains("--mascot") {
+            // Defer so the SwiftUI host is mounted and its openGeneration
+            // onChange can route to the mascot screen (same timing as --rail).
+            panelController.open()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.panelController.open(screen: .mascot)
+            }
+        } else if CommandLine.arguments.contains("--open") {
             panelController.open()
         }
         if CommandLine.arguments.contains("--rail") {

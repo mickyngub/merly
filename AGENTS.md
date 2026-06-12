@@ -7,6 +7,7 @@ Native macOS menu bar app (Swift/AppKit + SwiftUI) showing AI agent quota usage 
 - `swift build` — debug build
 - `.build/debug/Lens --print` — headless snapshot of all readers (fast smoke test, no UI)
 - `.build/debug/Lens --open [--expand|--light|--rail]` — launch with QA flags (panel open / cards expanded / forced light theme / collapsed rail)
+- `.build/debug/Lens --mascot` — launch straight to the menu bar mascot editor (the topnav brush screen)
 - `scripts/bundle.sh` — release build + assemble `build/Lens.app`
 
 ## Architecture

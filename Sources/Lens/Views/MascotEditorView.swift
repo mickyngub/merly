@@ -1,7 +1,8 @@
-// MascotEditorView.swift — the panel's mascot screen. A "Menu Bar" default
-// mascot at the top (the topnav critter), then one art picker per provider —
-// sprite sheet (own family only) or drawn critter, plus palette and drawn
-// style. Every change writes straight through the engine into providers.json.
+// MascotEditorView.swift — the panel's mascot screen, reached from the topnav
+// brush. Edits only the "Menu Bar" default mascot (the menu bar critter): sprite
+// sheet (any family) or drawn critter, plus palette and drawn style. Per-provider
+// mascots are edited inside each provider's Edit form, not here. Every change
+// writes straight through the engine into providers.json.
 
 import SwiftUI
 
@@ -16,7 +17,7 @@ struct MascotEditorView: View {
                 Image(systemName: "paintbrush.pointed.fill")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(theme.text2)
-                Text("Mascots")
+                Text("Menu Bar Mascot")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(theme.text)
                 Spacer(minLength: 0)
@@ -24,18 +25,6 @@ struct MascotEditorView: View {
             }
 
             DefaultMascotRow(engine: engine)
-            Divider().overlay(theme.hairline)
-
-            if engine.snapshots.isEmpty {
-                Text("Add a provider to customize its mascot.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(theme.text3)
-            } else {
-                ForEach(Array(engine.snapshots.enumerated()), id: \.element.id) { idx, snap in
-                    if idx > 0 { Divider().overlay(theme.hairline) }
-                    MascotRow(engine: engine, config: snap.config)
-                }
-            }
         }
         .padding(14)
         .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
@@ -69,43 +58,6 @@ private struct DefaultMascotRow: View {
             setSprite: { var m = mascot; m.sprite = $0; engine.updateDefaultMascot(m) },
             setPalette: { var m = mascot; m.palette = $0; engine.updateDefaultMascot(m) },
             setStyle: { var m = mascot; m.style = $0; engine.updateDefaultMascot(m) }
-        )
-    }
-}
-
-/// One provider's mascot controls. Derives its selection from the live config
-/// and writes edits back through the engine — no local state to keep in sync.
-/// Restricted to its own kind's sprite family.
-private struct MascotRow: View {
-    @ObservedObject var engine: UsageEngine
-    let config: ProviderConfig
-
-    /// A "Drawn" opt-out (`""`) plus this provider's own sprites.
-    private var sheets: [(id: String, label: String)] {
-        [("", "Drawn")] + config.kind.spriteFamily
-    }
-
-    /// Empty string when drawing the critter; otherwise the resolved sheet name.
-    private var selectedSprite: String {
-        config.sprite == "" ? "" : (config.resolvedSprite ?? "")
-    }
-
-    private var selectedPalette: String {
-        config.palette ?? config.kind.defaultPaletteName
-    }
-
-    var body: some View {
-        MascotControls(
-            title: config.name,
-            subtitle: config.account,
-            style: config.resolvedStyle,
-            palette: config.resolvedPalette,
-            paletteName: selectedPalette,
-            sprite: selectedSprite,
-            sheets: sheets,
-            setSprite: { var c = config; c.sprite = $0; engine.updateProvider(c) },
-            setPalette: { var c = config; c.palette = $0; engine.updateProvider(c) },
-            setStyle: { var c = config; c.style = $0; engine.updateProvider(c) }
         )
     }
 }

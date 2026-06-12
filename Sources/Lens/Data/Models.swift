@@ -36,10 +36,11 @@ enum ProviderKind: String, Codable, CaseIterable {
     }
 
     /// Sprite sheets this kind's mascot may use — its own family only, so the
-    /// editor can't dress a Claude provider up as Codex/Kimi.
+    /// editor can't dress a Claude provider up as Codex/Kimi. One art per kind:
+    /// color is set by the palette (the old "Work" sprite was just a blue Clawd).
     var spriteFamily: [(id: String, label: String)] {
         switch self {
-        case .claude: [("clawd-sprite", "Clawd"), ("clawd-work-sprite", "Work")]
+        case .claude: [("clawd-sprite", "Clawd")]
         case .codex: [("codex-sprite", "Codex")]
         case .kimi: [("kimi-sprite", "Kimi")]
         }
@@ -257,8 +258,7 @@ struct AppConfig: Codable {
                         kind: .claude, dir: "~/.claude", style: .cat, palette: "coral"),
          ["~/.claude/projects", "~/.claude.json"]),
         (ProviderConfig(id: "claude-work", name: "Claude", account: "Work",
-                        kind: .claude, dir: "~/.claude-work", style: .catTie, palette: "steel",
-                        sprite: "clawd-work-sprite"),
+                        kind: .claude, dir: "~/.claude-work", style: .catTie, palette: "steel"),
          ["~/.claude-work/projects", "~/.claude-work.json"]),
         (ProviderConfig(id: "codex", name: "Codex", account: "OpenAI",
                         kind: .codex, dir: "~/.codex", style: .robot, palette: "green"),
@@ -310,12 +310,30 @@ enum ConfigStore {
     static func load() -> AppConfig {
         let url = AppPaths.configFile
         if let data = try? Data(contentsOf: url),
-           let config = try? JSONDecoder().decode(AppConfig.self, from: data) {
+           var config = try? JSONDecoder().decode(AppConfig.self, from: data) {
+            if migrate(&config) { save(config) }
             return config
         }
         let config = AppConfig.firstRun()
         save(config)
         return config
+    }
+
+    /// Normalize retired identifiers so old configs keep resolving. The "Work"
+    /// Claude sprite was a recolored Clawd; now that any sprite follows the
+    /// palette, it collapses to "clawd-sprite" (its steel palette still tints it
+    /// blue). Returns true when something changed, so the caller can persist.
+    private static func migrate(_ config: inout AppConfig) -> Bool {
+        var changed = false
+        for i in config.providers.indices where config.providers[i].sprite == "clawd-work-sprite" {
+            config.providers[i].sprite = "clawd-sprite"
+            changed = true
+        }
+        if config.defaultMascot?.sprite == "clawd-work-sprite" {
+            config.defaultMascot?.sprite = "clawd-sprite"
+            changed = true
+        }
+        return changed
     }
 
     static func save(_ config: AppConfig) {
