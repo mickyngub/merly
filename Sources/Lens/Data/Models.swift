@@ -247,23 +247,54 @@ struct AppConfig: Codable {
         set { defaultMascot = newValue }
     }
 
+    /// Every coding CLI Lens can set up out of the box, paired with the on-disk
+    /// markers that prove the CLI is actually configured. Markers are specific
+    /// files (not just the dir), so a dir that merely holds a symlinked
+    /// `skills/` folder isn't mistaken for a real install. Drives both the
+    /// static default and first-run auto-detection.
+    static let knownProviders: [(config: ProviderConfig, markers: [String])] = [
+        (ProviderConfig(id: "claude-personal", name: "Claude", account: "Personal",
+                        kind: .claude, dir: "~/.claude", style: .cat, palette: "coral"),
+         ["~/.claude/projects", "~/.claude.json"]),
+        (ProviderConfig(id: "claude-work", name: "Claude", account: "Work",
+                        kind: .claude, dir: "~/.claude-work", style: .catTie, palette: "steel",
+                        sprite: "clawd-work-sprite"),
+         ["~/.claude-work/projects", "~/.claude-work.json"]),
+        (ProviderConfig(id: "codex", name: "Codex", account: "OpenAI",
+                        kind: .codex, dir: "~/.codex", style: .robot, palette: "green"),
+         ["~/.codex/auth.json"]),
+        (ProviderConfig(id: "kimi", name: "Kimi", account: "Moonshot",
+                        kind: .kimi, dir: "~/.kimi-code", style: .round, palette: "purple"),
+         ["~/.kimi-code/credentials/kimi-code.json"]),
+    ]
+
+    /// First-run discovery: keep only providers whose marker exists on disk.
+    static func autodetectedProviders() -> [ProviderConfig] {
+        knownProviders
+            .filter { $0.markers.contains { FileManager.default.fileExists(atPath: ($0 as NSString).expandingTildeInPath) } }
+            .map(\.config)
+    }
+
+    /// Static fallback used when auto-detection finds nothing, so a brand-new
+    /// install isn't an empty window.
     static let `default` = AppConfig(
         sessionHours: 5,
         refreshSeconds: 60,
-        providers: [
-            ProviderConfig(id: "claude-personal", name: "Claude", account: "Personal",
-                           kind: .claude, dir: "~/.claude", style: .cat, palette: "coral"),
-            ProviderConfig(id: "claude-work", name: "Claude", account: "Work",
-                           kind: .claude, dir: "~/.claude-work", style: .catTie, palette: "steel",
-                           sprite: "clawd-work-sprite"),
-            ProviderConfig(id: "codex", name: "Codex", account: "OpenAI",
-                           kind: .codex, dir: "~/.codex", style: .robot, palette: "green"),
-            ProviderConfig(id: "kimi", name: "Kimi", account: "Moonshot",
-                           kind: .kimi, dir: "~/.kimi-code", style: .round, palette: "purple"),
-        ],
+        providers: knownProviders.map(\.config),
         notifications: NotificationSettings(),
         defaultMascot: .standard
     )
+
+    /// The config to write on first launch: detected providers when any CLI is
+    /// found, otherwise the static default.
+    static func firstRun() -> AppConfig {
+        let detected = autodetectedProviders()
+        guard !detected.isEmpty else { return .default }
+        return AppConfig(
+            sessionHours: 5, refreshSeconds: 60, providers: detected,
+            notifications: NotificationSettings(), defaultMascot: .standard
+        )
+    }
 }
 
 enum AppPaths {
@@ -282,7 +313,7 @@ enum ConfigStore {
            let config = try? JSONDecoder().decode(AppConfig.self, from: data) {
             return config
         }
-        let config = AppConfig.default
+        let config = AppConfig.firstRun()
         save(config)
         return config
     }
