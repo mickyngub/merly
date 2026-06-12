@@ -92,9 +92,9 @@ struct AddProviderForm: View {
                         .font(.system(size: 10.5))
                         .foregroundStyle(Color(hex: 0xD9544E))
                 } else if !dir.isEmpty, !dirExists {
-                    Text("Folder not found — the card will show no data")
+                    Text("Folder not found — pick a valid config folder")
                         .font(.system(size: 10.5))
-                        .foregroundStyle(Color(hex: 0xB5710E))
+                        .foregroundStyle(Color(hex: 0xD9544E))
                 }
             }
 
@@ -222,6 +222,7 @@ struct AddProviderForm: View {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
             && !dir.trimmingCharacters(in: .whitespaces).isEmpty
             && !dirInUse
+            && dirExists
     }
 
     private func pickFolder() {
