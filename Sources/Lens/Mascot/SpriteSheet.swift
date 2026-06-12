@@ -29,19 +29,23 @@ struct SpriteSheet {
 enum SpriteSheetStore {
     private static var cache: [String: SpriteSheet?] = [:]
 
-    static func sheet(named name: String, cols: Int = 4, rows: Int = 4) -> SpriteSheet? {
+    static func sheet(named name: String, cols: Int = 4) -> SpriteSheet? {
         if let hit = cache[name] { return hit }
-        let loaded = load(name: name, cols: cols, rows: rows)
+        let loaded = load(name: name, cols: cols)
         cache[name] = loaded
         return loaded
     }
 
-    private static func load(name: String, cols: Int, rows: Int) -> SpriteSheet? {
+    private static func load(name: String, cols: Int) -> SpriteSheet? {
         guard let url = Bundle.module.url(forResource: name, withExtension: "png",
                                           subdirectory: "Resources"),
               let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil)
         else { return nil }
+        // Derive row count from image dimensions so taller sheets (more moods) work
+        // without any call-site changes — frame height matches frame width (square frames).
+        let frameWidth = img.width / cols
+        let rows = frameWidth > 0 ? img.height / frameWidth : cols
         return SpriteSheet(image: img, cols: cols, rows: rows)
     }
 }

@@ -93,7 +93,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         } else {
             ticksUntilEmote -= 1
             if ticksUntilEmote <= 0, let cur = current,
-               let row = (0..<4).filter({ $0 != cur.mood.spriteRow }).randomElement() {
+               let row = [0, 1, 2, 3, 6, 7].filter({ $0 != cur.mood.spriteRow }).randomElement() {
                 emote = (row, Int.random(in: 4...8))
             }
         }

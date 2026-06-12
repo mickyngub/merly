@@ -5,7 +5,7 @@
 import SwiftUI
 
 enum Mood: String, Comparable {
-    case happy, content, tired, stressed
+    case happy, content, tired, stressed, sleeping, excited, wink, curious
 
     static func from(pct: Double) -> Mood {
         if pct >= 88 { return .stressed }
@@ -20,6 +20,10 @@ enum Mood: String, Comparable {
         case .content: "OK"
         case .tired: "BUSY"
         case .stressed: "FRIED"
+        case .sleeping: "ZZZ"
+        case .excited: "GO!"
+        case .wink: "WINK"
+        case .curious: "HMM?"
         }
     }
 
@@ -29,6 +33,10 @@ enum Mood: String, Comparable {
         case .content: Color(hex: 0x1F6FD6)
         case .tired: Color(hex: 0xB5710E)
         case .stressed: Color(hex: 0xD23B3B)
+        case .sleeping: Color(hex: 0x4A7AB5)
+        case .excited: Color(hex: 0xD97B20)
+        case .wink: Color(hex: 0x8B5CF6)
+        case .curious: Color(hex: 0x0891B2)
         }
     }
 
@@ -38,24 +46,36 @@ enum Mood: String, Comparable {
         case .content: Color(hex: 0x1F6FD6, alpha: 0.15)
         case .tired: Color(hex: 0xE8A33D, alpha: 0.18)
         case .stressed: Color(hex: 0xE5484D, alpha: 0.18)
+        case .sleeping: Color(hex: 0x6B9FD4, alpha: 0.15)
+        case .excited: Color(hex: 0xFF9B3D, alpha: 0.18)
+        case .wink: Color(hex: 0x8B5CF6, alpha: 0.15)
+        case .curious: Color(hex: 0x06B6D4, alpha: 0.15)
         }
     }
 
+    // Pressure rank for Comparable — sleeping/excited/wink/curious sit at the happy level.
     private var rank: Int {
-        switch self { case .happy: 0; case .content: 1; case .tired: 2; case .stressed: 3 }
+        switch self {
+        case .sleeping, .excited, .wink, .curious: 0
+        case .happy: 1; case .content: 2; case .tired: 3; case .stressed: 4
+        }
     }
     static func < (lhs: Mood, rhs: Mood) -> Bool { lhs.rank < rhs.rank }
 
-    /// Row index into a sprite sheet (top→bottom: happy, neutral, tired, stressed).
-    var spriteRow: Int { rank }
+    /// Row index into a sprite sheet (top→bottom: happy, content, tired, stressed, sleeping, excited, wink, curious).
+    var spriteRow: Int {
+        switch self {
+        case .happy: 0; case .content: 1; case .tired: 2; case .stressed: 3
+        case .sleeping: 4; case .excited: 5; case .wink: 6; case .curious: 7
+        }
+    }
 
     /// Inverse of `spriteRow`, for picking expressions straight off a sheet.
     static func fromRow(_ row: Int) -> Mood {
         switch row {
-        case 0: .happy
-        case 1: .content
-        case 2: .tired
-        default: .stressed
+        case 0: .happy; case 1: .content; case 2: .tired; case 3: .stressed
+        case 4: .sleeping; case 5: .excited; case 6: .wink; case 7: .curious
+        default: .happy
         }
     }
 }
@@ -190,7 +210,8 @@ enum SpriteBuilder {
 
     private static func stampFace(_ g: inout SpriteGrid, mood: Mood, blink: Bool) {
         let lx = 6, rx = 9 // eye columns
-        if blink, mood != .stressed {
+        // sleeping/wink already have intentional eye states — don't let blink overwrite them
+        if blink, mood != .stressed, mood != .sleeping, mood != .wink {
             g.set(lx, 8, "E"); g.set(rx, 8, "E")
             g.set(7, 11, "M"); g.set(8, 11, "M") // flat smile underneath stays
             return
@@ -213,6 +234,27 @@ enum SpriteBuilder {
             g.set(9, 7, "W"); g.set(10, 7, "W"); g.set(9, 8, "W"); g.set(10, 8, "W"); g.set(9, 8, "E")
             g.set(7, 11, "M"); g.set(8, 11, "M"); g.set(7, 12, "M"); g.set(8, 12, "M") // open mouth
             g.set(3, 7, "S"); g.set(12, 7, "S")                                        // sweat
+        case .sleeping:
+            g.set(5, 8, "D"); g.set(6, 8, "D")                                     // left eye closed
+            g.set(9, 8, "D"); g.set(10, 8, "D")                                    // right eye closed
+            g.set(11, 5, "S"); g.set(12, 5, "S")                                   // zzz top stroke
+            g.set(12, 6, "S")                                                       // zzz diagonal
+            g.set(11, 7, "S"); g.set(12, 7, "S")                                   // zzz bottom stroke
+            g.set(7, 12, "M"); g.set(8, 12, "M")                                   // relaxed mouth
+        case .excited:
+            g.set(lx, 8, "E"); g.set(rx, 8, "E")
+            g.set(5, 6, "A"); g.set(10, 6, "A")                                    // sparkle dots above eyes
+            g.set(4, 9, "C"); g.set(5, 9, "C"); g.set(10, 9, "C"); g.set(11, 9, "C") // wide cheeks
+            g.set(6, 11, "M"); g.set(9, 11, "M"); g.set(7, 12, "M"); g.set(8, 12, "M") // big smile
+        case .wink:
+            g.set(5, 8, "D"); g.set(6, 8, "D")                                     // left eye closed (line)
+            g.set(rx, 8, "E")                                                       // right eye open
+            g.set(5, 9, "C"); g.set(10, 9, "C")                                    // cheeks
+            g.set(6, 11, "M"); g.set(9, 11, "M"); g.set(7, 12, "M"); g.set(8, 12, "M") // smile
+        case .curious:
+            g.set(7, 7, "E"); g.set(10, 7, "E")                                    // eyes shifted up-right
+            g.set(12, 5, "S"); g.set(12, 6, "S")                                   // small ! dot (noticing something)
+            g.set(7, 11, "M"); g.set(8, 11, "M")                                   // flat mouth
         }
     }
 }

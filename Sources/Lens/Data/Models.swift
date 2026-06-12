@@ -148,7 +148,11 @@ struct ProviderSnapshot: Identifiable, Equatable {
     var pressurePct: Double {
         isEstimated ? sessionPct : max(sessionPct, weekly.map(\.pct).max() ?? 0)
     }
-    var mood: Mood { Mood.from(pct: pressurePct) }
+    var mood: Mood {
+        if !isActive && !isEstimated && pressurePct < 5 { return .sleeping }
+        if isActive && pressurePct < 15 { return .excited }
+        return Mood.from(pct: pressurePct)
+    }
 
     static func empty(_ config: ProviderConfig, note: String? = nil) -> ProviderSnapshot {
         ProviderSnapshot(
