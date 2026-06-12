@@ -2,13 +2,38 @@
 
 import Foundation
 
-enum ProviderKind: String, Codable {
+enum ProviderKind: String, Codable, CaseIterable {
     /// Claude Code-style config dir: transcripts under projects/**/*.jsonl
     case claude
     /// Codex CLI: rollout files under sessions/YYYY/MM/DD/*.jsonl with real rate_limits
     case codex
     /// Kimi Code: wire.jsonl event logs under sessions/wd_*/ses_*/agents/*
     case kimi
+
+    var displayName: String {
+        switch self {
+        case .claude: "Claude"
+        case .codex: "Codex"
+        case .kimi: "Kimi"
+        }
+    }
+
+    /// Where the matching CLI keeps its config by default.
+    var defaultDir: String {
+        switch self {
+        case .claude: "~/.claude"
+        case .codex: "~/.codex"
+        case .kimi: "~/.kimi-code"
+        }
+    }
+
+    var defaultPaletteName: String {
+        switch self {
+        case .claude: "coral"
+        case .codex: "green"
+        case .kimi: "purple"
+        }
+    }
 }
 
 struct ProviderConfig: Codable, Identifiable, Equatable {
@@ -163,10 +188,30 @@ enum LastGoodStore {
     }
 }
 
+/// User-tunable alerting. Persisted inside AppConfig so it rides the same
+/// providers.json the engine reloads every refresh.
+struct NotificationSettings: Codable, Equatable {
+    /// Master switch for all usage alerts.
+    var enabled: Bool = false
+    /// Notify when a provider's closest-limit pressure first crosses this %.
+    var thresholdPct: Double = 80
+    /// Notify when a previously-busy session window resets and frees up.
+    var notifyOnReset: Bool = true
+}
+
 struct AppConfig: Codable {
     var sessionHours: Double
     var refreshSeconds: Double
     var providers: [ProviderConfig]
+    /// Optional so configs written before alerts existed still decode (a missing
+    /// key would otherwise throw and wipe the user's providers back to default).
+    var notifications: NotificationSettings?
+
+    /// Always-present view of the alert settings, defaulting when absent.
+    var notificationSettings: NotificationSettings {
+        get { notifications ?? NotificationSettings() }
+        set { notifications = newValue }
+    }
 
     static let `default` = AppConfig(
         sessionHours: 5,
@@ -181,7 +226,8 @@ struct AppConfig: Codable {
                            kind: .codex, dir: "~/.codex", style: .robot, palette: "green"),
             ProviderConfig(id: "kimi", name: "Kimi", account: "Moonshot",
                            kind: .kimi, dir: "~/.kimi-code", style: .round, palette: "purple"),
-        ]
+        ],
+        notifications: NotificationSettings()
     )
 }
 

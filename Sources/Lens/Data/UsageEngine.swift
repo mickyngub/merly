@@ -13,6 +13,9 @@ final class UsageEngine: ObservableObject {
     private(set) var appConfig: AppConfig
     private var timer: Timer?
     private var cooldowns: [String: Date] = [:]
+    /// Set when refresh() is called mid-pass, so config edits (e.g. a provider
+    /// just added) aren't lost to the in-flight pass's stale config.
+    private var pendingRefresh = false
     private let workQueue = DispatchQueue(label: "sh.micky.usagedock.engine", qos: .utility)
 
     init() {
@@ -29,7 +32,10 @@ final class UsageEngine: ObservableObject {
     }
 
     func refresh() {
-        guard !isRefreshing else { return }
+        guard !isRefreshing else {
+            pendingRefresh = true
+            return
+        }
         isRefreshing = true
         // Pick up config edits (e.g. a provider added via providers.json).
         appConfig = ConfigStore.load()
@@ -55,8 +61,90 @@ final class UsageEngine: ObservableObject {
                 self.snapshots = results
                 self.lastRefresh = Date()
                 self.isRefreshing = false
+                if self.pendingRefresh {
+                    self.pendingRefresh = false
+                    self.refresh()
+                }
             }
         }
+    }
+
+    /// Append a provider to providers.json and kick a refresh. An empty snapshot
+    /// shows the card immediately; the refresh pass fills in real numbers.
+    func addProvider(_ provider: ProviderConfig) {
+        var config = ConfigStore.load()
+        config.providers.append(provider)
+        ConfigStore.save(config)
+        appConfig = config
+        snapshots.append(.empty(provider))
+        refresh()
+    }
+
+    /// Replace a provider's config in place (same id), keeping its list position.
+    /// Refreshes since the folder/kind may now point at different data.
+    func updateProvider(_ provider: ProviderConfig) {
+        var config = appConfig
+        guard let idx = config.providers.firstIndex(where: { $0.id == provider.id }) else { return }
+        config.providers[idx] = provider
+        ConfigStore.save(config)
+        appConfig = config
+        if let sIdx = snapshots.firstIndex(where: { $0.id == provider.id }) {
+            snapshots[sIdx].config = provider
+        }
+        refresh()
+    }
+
+    /// Drop a provider from providers.json and the live list. No refresh needed —
+    /// the remaining snapshots are still current.
+    func removeProvider(_ id: String) {
+        var config = appConfig
+        config.providers.removeAll { $0.id == id }
+        apply(config)
+    }
+
+    /// Move the provider `id` to where `targetId` currently sits. Called live as a
+    /// dragged card passes over another, so the reorder animates under the cursor.
+    func moveProvider(_ id: String, toIndexOf targetId: String) {
+        var config = appConfig
+        guard let from = config.providers.firstIndex(where: { $0.id == id }),
+              let to = config.providers.firstIndex(where: { $0.id == targetId }),
+              from != to else { return }
+        config.providers.move(fromOffsets: IndexSet(integer: from),
+                              toOffset: to > from ? to + 1 : to)
+        apply(config)
+    }
+
+    /// True when a config folder is already claimed by an existing provider.
+    /// Drives the add-form's duplicate guard (folders are the unique key).
+    /// `excluding` skips one provider id so the edit form doesn't flag itself.
+    func isDirInUse(_ dir: String, excluding id: String? = nil) -> Bool {
+        let norm = Self.normalizedDir(dir)
+        return appConfig.providers.contains { $0.id != id && Self.normalizedDir($0.dir) == norm }
+    }
+
+    /// Persist tweaked alert settings. Lives in AppConfig so the next refresh
+    /// (which reloads from disk) keeps them.
+    func updateNotificationSettings(_ settings: NotificationSettings) {
+        var config = appConfig
+        config.notificationSettings = settings
+        ConfigStore.save(config)
+        appConfig = config
+    }
+
+    /// Tilde-expanded, trailing-slash-stripped path for stable folder comparison.
+    static func normalizedDir(_ dir: String) -> String {
+        let expanded = (dir as NSString).expandingTildeInPath
+        return expanded.count > 1 && expanded.hasSuffix("/") ? String(expanded.dropLast()) : expanded
+    }
+
+    /// Persist a new provider set and re-derive snapshots in the new order,
+    /// reusing the live readings keyed by id so removed/reordered cards don't
+    /// flash empty.
+    private func apply(_ config: AppConfig) {
+        ConfigStore.save(config)
+        appConfig = config
+        let byId = Dictionary(snapshots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        snapshots = config.providers.compactMap { byId[$0.id] }
     }
 
     /// Busiest provider — drives the menu bar extra, like the prototype's peak pick.

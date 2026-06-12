@@ -40,8 +40,15 @@ final class PanelController: NSObject {
         installMonitors()
     }
 
+    /// Borderless panels refuse key status by default, which would make the
+    /// add-provider form's text fields untypeable. .nonactivatingPanel still
+    /// keeps the app itself from activating (Spotlight-style).
+    private final class KeyablePanel: NSPanel {
+        override var canBecomeKey: Bool { true }
+    }
+
     private static func makePanel(width: CGFloat) -> NSPanel {
-        let p = NSPanel(
+        let p = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: width, height: 600),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -183,6 +190,7 @@ final class PanelController: NSObject {
             if let self, self.state == .open,
                let window = event.window,
                window != self.panel, window != self.rail,
+               !(window is NSSavePanel), // the form's folder picker
                !self.ignoredWindows.contains(window) {
                 self.hide()
             }

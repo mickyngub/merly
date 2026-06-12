@@ -90,6 +90,9 @@ struct MascotPalette: Codable, Equatable {
         "pink":   .init(B: 0xE06A9F, D: 0xBC4A7E, L: 0xF7C2DA, O: 0x7E2450, E: 0x3A1426, W: 0xFFFFFF, M: 0x8A2B58, C: 0xFF9CC4, S: 0x8FBFFF, A: 0xF7C2DA),
     ]
 
+    /// Stable display order for palette pickers (dictionaries don't keep one).
+    static let presetOrder = ["coral", "steel", "green", "purple", "gold", "pink"]
+
     static func preset(_ name: String?) -> MascotPalette {
         presets[name ?? "coral"] ?? presets["coral"]!
     }

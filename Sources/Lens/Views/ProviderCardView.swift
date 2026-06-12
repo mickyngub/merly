@@ -6,6 +6,11 @@ import SwiftUI
 
 struct ProviderCardView: View {
     let snapshot: ProviderSnapshot
+    /// Edit mode swaps the session ring for a delete button + drag grip and
+    /// pauses tap-to-expand so reordering drags don't toggle the detail.
+    var editing: Bool = false
+    var onEdit: () -> Void = {}
+    var onDelete: () -> Void = {}
 
     // --expand pre-opens every card (visual QA without scripted clicks)
     @State private var open = ProcessInfo.processInfo.arguments.contains("--expand")
@@ -17,7 +22,7 @@ struct ProviderCardView: View {
     var body: some View {
         VStack(spacing: 0) {
             cardTop
-            if open {
+            if open, !editing {
                 detail
                     .transition(.opacity)
             }
@@ -31,12 +36,16 @@ struct ProviderCardView: View {
             RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .strokeBorder(theme.cardBorder, lineWidth: 0.5)
         )
-        .offset(y: hovering ? -1 : 0)
-        .shadow(color: .black.opacity(hovering ? 0.10 : 0), radius: 9, y: 6)
+        .offset(y: hovering && !editing ? -1 : 0)
+        .shadow(color: .black.opacity(hovering && !editing ? 0.10 : 0), radius: 9, y: 6)
         .animation(.easeOut(duration: 0.18), value: hovering)
         .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         .onTapGesture {
-            withAnimation(Theme.snappy(0.34)) { open.toggle() }
+            if editing {
+                onEdit()
+            } else {
+                withAnimation(Theme.snappy(0.34)) { open.toggle() }
+            }
         }
         .onHover { hovering = $0 }
         .help(snapshot.note ?? "")
@@ -44,6 +53,12 @@ struct ProviderCardView: View {
 
     private var cardTop: some View {
         HStack(spacing: 11) {
+            if editing {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(theme.text3)
+                    .help("Drag to reorder")
+            }
             ZStack(alignment: .topTrailing) {
                 MascotView(
                     style: snapshot.config.resolvedStyle,
@@ -86,7 +101,11 @@ struct ProviderCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            RingView(pct: snapshot.sessionPct, accent: accent, estimated: snapshot.isEstimated)
+            if editing {
+                DeleteButton(action: onDelete)
+            } else {
+                RingView(pct: snapshot.sessionPct, accent: accent, estimated: snapshot.isEstimated)
+            }
         }
     }
 
@@ -215,6 +234,29 @@ struct UsageBar: View {
                 .foregroundStyle(theme.text2)
                 .padding(.top, -1)
         }
+    }
+}
+
+/// Round trash button shown on each card in edit mode. Reddens on hover.
+struct DeleteButton: View {
+    let action: () -> Void
+
+    @State private var hovering = false
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "trash")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(hovering ? .white : Color(hex: 0xD9544E))
+                .frame(width: 34, height: 34)
+                .background(
+                    Circle().fill(hovering ? Color(hex: 0xD9544E) : theme.chip)
+                )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Remove this provider")
     }
 }
 

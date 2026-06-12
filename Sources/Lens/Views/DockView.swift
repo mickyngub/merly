@@ -2,6 +2,7 @@
 // staggered entrance, and the add-provider affordance. Also the collapsed rail.
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct DockView: View {
     @ObservedObject var engine: UsageEngine
@@ -9,6 +10,11 @@ struct DockView: View {
     let openGeneration: Int
 
     @State private var refreshSpin = 0.0
+    @State private var addingProvider = false
+    @State private var editing = false
+    @State private var showingSettings = false
+    @State private var editingProviderId: String?
+    @State private var draggingId: String?
     @Environment(\.theme) private var theme
 
     var body: some View {
@@ -16,15 +22,67 @@ struct DockView: View {
             header
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 9) {
-                    ForEach(Array(engine.snapshots.enumerated()), id: \.element.id) { index, snapshot in
-                        ProviderCardView(snapshot: snapshot)
-                            .entrance(index: index, generation: openGeneration)
+                    if showingSettings {
+                        SettingsView(engine: engine) {
+                            withAnimation(Theme.snappy(0.4)) { showingSettings = false }
+                        }
+                        .entrance(index: 0, generation: openGeneration)
+                    } else {
+                        providerList
                     }
-                    AddProviderCard()
-                        .entrance(index: engine.snapshots.count, generation: openGeneration)
                 }
                 .padding(EdgeInsets(top: 2, leading: 12, bottom: 12, trailing: 12))
+                // Reset the drag state when a card is dropped in a gap (no card
+                // delegate fires), so the faded card snaps back to full opacity.
+                .onDrop(of: [.text], isTargeted: nil) { _ in
+                    draggingId = nil
+                    return false
+                }
             }
+        }
+        .onChange(of: openGeneration) { _, _ in
+            addingProvider = false
+            editing = false
+            showingSettings = false
+            editingProviderId = nil
+        }
+    }
+
+    @ViewBuilder
+    private var providerList: some View {
+        ForEach(Array(engine.snapshots.enumerated()), id: \.element.id) { index, snapshot in
+            if editingProviderId == snapshot.id {
+                AddProviderForm(engine: engine, editing: snapshot.config) {
+                    withAnimation(Theme.snappy(0.4)) { editingProviderId = nil }
+                }
+                .entrance(index: index, generation: openGeneration)
+            } else {
+                ProviderCardView(
+                    snapshot: snapshot,
+                    editing: editing,
+                    onEdit: { withAnimation(Theme.snappy(0.4)) { editingProviderId = snapshot.id } },
+                    onDelete: { withAnimation(Theme.snappy(0.4)) { engine.removeProvider(snapshot.id) } }
+                )
+                .opacity(draggingId == snapshot.id ? 0.4 : 1)
+                .reorderable(active: editing, id: snapshot.id, draggingId: $draggingId) { dragged, target in
+                    withAnimation(Theme.snappy(0.3)) { engine.moveProvider(dragged, toIndexOf: target) }
+                }
+                .entrance(index: index, generation: openGeneration)
+            }
+        }
+        if !editing {
+            Group {
+                if addingProvider {
+                    AddProviderForm(engine: engine) {
+                        withAnimation(Theme.snappy(0.4)) { addingProvider = false }
+                    }
+                } else {
+                    AddProviderCard {
+                        withAnimation(Theme.snappy(0.4)) { addingProvider = true }
+                    }
+                }
+            }
+            .entrance(index: engine.snapshots.count, generation: openGeneration)
         }
     }
 
@@ -42,6 +100,22 @@ struct DockView: View {
                 }
             }
             Spacer()
+            if !showingSettings, !engine.snapshots.isEmpty {
+                IconButton(systemName: editing ? "checkmark" : "slider.horizontal.3") {
+                    withAnimation(Theme.snappy(0.3)) {
+                        editing.toggle()
+                        if editing { addingProvider = false; editingProviderId = nil }
+                    }
+                }
+                .help(editing ? "Done editing" : "Edit providers")
+            }
+            IconButton(systemName: showingSettings ? "checkmark" : "gearshape") {
+                withAnimation(Theme.snappy(0.3)) {
+                    showingSettings.toggle()
+                    if showingSettings { editing = false; addingProvider = false; editingProviderId = nil }
+                }
+            }
+            .help(showingSettings ? "Done" : "Settings")
             IconButton(systemName: "arrow.clockwise") {
                 withAnimation(.easeInOut(duration: 0.6)) { refreshSpin += 360 }
                 engine.refresh()
@@ -49,6 +123,62 @@ struct DockView: View {
             .rotationEffect(.degrees(refreshSpin))
         }
         .padding(EdgeInsets(top: 15, leading: 16, bottom: 11, trailing: 12))
+    }
+}
+
+/// Makes a card draggable and a drop target while edit mode is on. As a dragged
+/// card passes over another, `onMove` reorders live under the cursor.
+private struct Reorderable: ViewModifier {
+    let active: Bool
+    let id: String
+    @Binding var draggingId: String?
+    let onMove: (_ dragged: String, _ target: String) -> Void
+
+    func body(content: Content) -> some View {
+        if active {
+            content
+                .onDrag {
+                    draggingId = id
+                    return NSItemProvider(object: id as NSString)
+                }
+                .onDrop(
+                    of: [.text],
+                    delegate: ReorderDropDelegate(targetId: id, draggingId: $draggingId, onMove: onMove)
+                )
+        } else {
+            content
+        }
+    }
+}
+
+private struct ReorderDropDelegate: DropDelegate {
+    let targetId: String
+    @Binding var draggingId: String?
+    let onMove: (_ dragged: String, _ target: String) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let dragged = draggingId, dragged != targetId else { return }
+        onMove(dragged, targetId)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingId = nil
+        return true
+    }
+}
+
+private extension View {
+    func reorderable(
+        active: Bool,
+        id: String,
+        draggingId: Binding<String?>,
+        onMove: @escaping (_ dragged: String, _ target: String) -> Void
+    ) -> some View {
+        modifier(Reorderable(active: active, id: id, draggingId: draggingId, onMove: onMove))
     }
 }
 
@@ -73,13 +203,13 @@ struct IconButton: View {
 }
 
 struct AddProviderCard: View {
+    let action: () -> Void
+
     @State private var hovering = false
     @Environment(\.theme) private var theme
 
     var body: some View {
-        Button {
-            NSWorkspace.shared.open(AppPaths.configFile)
-        } label: {
+        Button(action: action) {
             HStack(spacing: 11) {
                 Image(systemName: "plus")
                     .font(.system(size: 15, weight: .medium))
@@ -90,7 +220,7 @@ struct AddProviderCard: View {
                     Text("Add a provider")
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(hovering ? theme.text : theme.text2)
-                    Text("Point it at a config folder")
+                    Text("Pick a kind, point at a config folder")
                         .font(.system(size: 11))
                         .foregroundStyle(theme.text3)
                 }
@@ -108,7 +238,7 @@ struct AddProviderCard: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help("Opens providers.json — add an entry and it appears on the next refresh")
+        .help("Add a provider right here — saved to providers.json")
     }
 }
 
