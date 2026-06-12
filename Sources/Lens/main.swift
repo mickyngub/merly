@@ -8,11 +8,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var engine: UsageEngine!
     private var panelController: PanelController!
     private var statusItemController: StatusItemController!
+    private var notificationManager: NotificationManager!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         engine = UsageEngine()
         panelController = PanelController(engine: engine)
         statusItemController = StatusItemController(engine: engine, panel: panelController)
+        notificationManager = NotificationManager(engine: engine)
         if CommandLine.arguments.contains("--light") {
             NSApp.appearance = NSAppearance(named: .aqua)
         }
