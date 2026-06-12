@@ -12,6 +12,7 @@ Native macOS menu bar app (Swift/AppKit + SwiftUI) showing AI agent quota usage 
 ## Architecture
 
 - `Sources/Lens/Mascot/Sprite.swift` — 16×16 pixel critter builder (palette + ear style + mood face). New provider = palette preset + `MascotStyle`.
+- `Sources/Lens/Mascot/SpriteRecolor.swift` — duotone-tints baked sprite sheets toward the palette accent (luminance → dark→accent→light ramp), so sprite mascots follow their chosen color like the drawn critter does. Both renderers (`MascotView`, `StatusItemController`) go through `SpriteSheetStore.recoloredFrame`; results are memoized per (frame, accent).
 - `Sources/Lens/Data/ProviderAPI.swift` — real rate limits: Claude via Keychain OAuth token → `api.anthropic.com/api/oauth/usage`; Codex via `auth.json` → `chatgpt.com/backend-api/wham/usage`; Kimi via credentials file + refresh (flock protocol, **must** persist rotated tokens back or the CLI gets logged out) → `api.kimi.com/coding/v1/usages`.
 - `Sources/Lens/Data/Readers.swift` — API-first per `ProviderKind`, falling back to local file analysis (`TokenWindowEstimator` for Claude/Kimi transcripts, rollout `rate_limits` events for Codex) with `isEstimated: true`. The estimate is only an offline safety net for an API-backed provider — never the sole basis for one.
 - `Sources/Lens/PanelController.swift` — hidden/open/rail state machine, NSPanel slide animations.

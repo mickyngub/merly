@@ -104,8 +104,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let button = statusItem.button, let cur = current else { return }
         let row = emote?.row ?? cur.mood.spriteRow
         if let name = cur.sprite,
-           let sheet = SpriteSheetStore.sheet(named: name),
-           let cg = sheet.frame(row: row, col: animFrame) {
+           let cg = SpriteSheetStore.recoloredFrame(
+               name: name, row: row, col: animFrame, accentHex: cur.palette.B
+           ) {
             let img = NSImage(cgImage: cg, size: NSSize(width: iconPoints, height: iconPoints))
             img.isTemplate = false
             button.image = img

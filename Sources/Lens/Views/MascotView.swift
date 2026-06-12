@@ -96,7 +96,10 @@ struct MascotView: View {
     private var taskKey: String { "\(style.rawValue)-\(mood.rawValue)" }
 
     @ViewBuilder private var content: some View {
-        if let sheet, let cg = sheet.frame(row: mood.spriteRow, col: frameIndex) {
+        if let spriteName, sheet != nil,
+           let cg = SpriteSheetStore.recoloredFrame(
+               name: spriteName, row: mood.spriteRow, col: frameIndex, accentHex: palette.B
+           ) {
             Image(decorative: cg, scale: 1)
                 .interpolation(.high)
                 .resizable()
