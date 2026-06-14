@@ -35,6 +35,20 @@ enum ProviderAPIError: Error, CustomStringConvertible {
         case .parse(let what): "unexpected response (\(what))"
         }
     }
+
+    /// The login is gone, not merely unreachable: the token expired or there are
+    /// no credentials. Readers whose only fallback is a misleading local estimate
+    /// surface "No data" for these instead of guessing.
+    var isAuthLapse: Bool {
+        switch self {
+        case .expiredToken, .noCredentials: true
+        default: false
+        }
+    }
+}
+
+extension Error {
+    var isAuthLapse: Bool { (self as? ProviderAPIError)?.isAuthLapse ?? false }
 }
 
 // MARK: - small sync HTTP helper (always called off the main thread)

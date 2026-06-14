@@ -135,6 +135,11 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// True when these are the last *real* API numbers, served because the live
     /// fetch failed transiently (e.g. HTTP 429). Real, just not fresh.
     var isStale: Bool = false
+    /// True when the provider's login lapsed (token expired / signed out) and we
+    /// have no fresh real reading to fall back on — so there is genuinely *no
+    /// data*. The card shows a "No data" state and the mascot goes `.dead`
+    /// instead of inventing a "vs your busiest week" estimate that reads as real.
+    var isUnavailable: Bool = false
     /// Optional note (e.g. Codex plan type, or why data is missing).
     var note: String?
 
@@ -146,9 +151,11 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// the estimated weekly bars are "vs your busiest week" ratios that trend
     /// to 100% by construction, so they must not drive a stressed mood.
     var pressurePct: Double {
-        isEstimated ? sessionPct : max(sessionPct, weekly.map(\.pct).max() ?? 0)
+        if isUnavailable { return 0 } // no data → no pressure (never the menu-bar peak)
+        return isEstimated ? sessionPct : max(sessionPct, weekly.map(\.pct).max() ?? 0)
     }
     var mood: Mood {
+        if isUnavailable { return .dead }
         if !isActive && !isEstimated && pressurePct < 5 { return .sleeping }
         if isActive && pressurePct < 15 { return .excited }
         return Mood.from(pct: pressurePct)
@@ -161,9 +168,19 @@ struct ProviderSnapshot: Identifiable, Equatable {
         )
     }
 
+    /// No usable data: the login lapsed and there's no fresh real reading to
+    /// show. Renders as a "No data" card with the `.dead` mascot.
+    static func unavailable(_ config: ProviderConfig, note: String? = nil) -> ProviderSnapshot {
+        ProviderSnapshot(
+            config: config, sessionPct: 0, sessionResetAt: nil,
+            weekly: [], isActive: false, isEstimated: false,
+            isUnavailable: true, note: note
+        )
+    }
+
     /// The real numbers worth caching to ride out a transient API failure.
     func realReading(at now: Date) -> RealReading? {
-        guard !isEstimated, !isStale else { return nil }
+        guard !isEstimated, !isStale, !isUnavailable else { return nil }
         return RealReading(
             sessionPct: sessionPct, sessionResetAt: sessionResetAt,
             weekly: weekly, planNote: note, capturedAt: now

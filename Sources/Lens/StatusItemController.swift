@@ -55,7 +55,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // tracks the busiest provider's pressure (happy when there are none).
         let mascot = engine.appConfig.defaultMascotConfig
         let peak = snapshots.max(by: { $0.pressurePct < $1.pressurePct })
-        let mood = peak?.mood ?? .happy
+        // The menu-bar mascot is the app itself — a single lapsed provider
+        // shouldn't make the whole icon look dead, so treat that as happy.
+        let mood = peak.map { $0.isUnavailable ? .happy : $0.mood } ?? .happy
         button.title = ""
         if mood != current?.mood { emote = nil } // real data beats a flourish
         current = (mascot.resolvedSprite, mascot.style, mascot.resolvedPalette, mood)

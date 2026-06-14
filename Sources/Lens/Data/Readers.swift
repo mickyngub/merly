@@ -28,7 +28,7 @@ private func apiFirst(
     ctx: inout ReaderContext,
     now: Date,
     fetch: () throws -> ProviderSnapshot,
-    fallback: () -> ProviderSnapshot
+    fallback: (_ fetchError: Error?) -> ProviderSnapshot
 ) -> ProviderSnapshot {
     let cooling = ctx.cooldownUntil[config.id].map { $0 > now } ?? false
     var fetchError: Error?
@@ -55,9 +55,13 @@ private func apiFirst(
         return .fromCache(cached, config: config, now: now)
     }
 
-    var snapshot = fallback()
-    let reason = fetchError.map { "\($0)" } ?? "API cooling down"
-    snapshot.note = [snapshot.note, reason].compactMap(\.self).joined(separator: " · ")
+    var snapshot = fallback(fetchError)
+    // A "No data" fallback carries its own concise note; don't tack the raw
+    // "login expired (…)" reason onto it.
+    if !snapshot.isUnavailable {
+        let reason = fetchError.map { "\($0)" } ?? "API cooling down"
+        snapshot.note = [snapshot.note, reason].compactMap(\.self).joined(separator: " · ")
+    }
     return snapshot
 }
 
@@ -166,8 +170,13 @@ struct ClaudeReader: UsageReader {
                 isEstimated: false,
                 note: usage.planLabel
             )
-        }, fallback: {
-            estimate(config: config, app: app, cache: &fileCache, now: now, root: projectsRoot)
+        }, fallback: { error in
+            // Login lapsed → genuinely no data. Don't fall back to the
+            // "vs your busiest week" estimate, which reads as real 100% usage.
+            if error?.isAuthLapse == true {
+                return .unavailable(config, note: "Sign in again — run any \(config.name) command")
+            }
+            return estimate(config: config, app: app, cache: &fileCache, now: now, root: projectsRoot)
         })
     }
 
@@ -275,7 +284,9 @@ struct CodexReader: UsageReader {
                 isEstimated: false,
                 note: usage.planLabel
             )
-        }, fallback: {
+        }, fallback: { _ in
+            // Codex rollout files carry real rate_limits events, so the offline
+            // fallback is genuine data (not an estimate) even when auth lapses.
             rolloutFallback(config: config, now: now, root: sessionsRoot)
         })
     }
@@ -403,8 +414,11 @@ struct KimiReader: UsageReader {
                 isEstimated: false,
                 note: usage.planLabel
             )
-        }, fallback: {
-            estimate(config: config, app: app, cache: &fileCache, now: now, root: sessionsRoot)
+        }, fallback: { error in
+            if error?.isAuthLapse == true {
+                return .unavailable(config, note: "Sign in again — run any \(config.name) command")
+            }
+            return estimate(config: config, app: app, cache: &fileCache, now: now, root: sessionsRoot)
         })
     }
 

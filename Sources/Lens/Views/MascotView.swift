@@ -68,7 +68,7 @@ struct MascotView: View {
             .onAppear { if bobActive { bobUp = true } }
             .onChange(of: bobActive) { _, active in bobUp = active }
             .onHover { inside in
-                if inside, hopsOnHover, !reduceMotion { hopTrigger += 1 }
+                if inside, hopsOnHover, !reduceMotion, mood != .dead { hopTrigger += 1 }
             }
             .task(id: taskKey) {
                 // random blink: 2.2–5.0s apart, 140ms long (skipped while stressed)
@@ -92,13 +92,23 @@ struct MascotView: View {
             }
     }
 
-    private var bobActive: Bool { bob && !reduceMotion }
+    private var bobActive: Bool { bob && !reduceMotion && mood != .dead }
     private var taskKey: String { "\(style.rawValue)-\(mood.rawValue)" }
 
     @ViewBuilder private var content: some View {
+        spriteContent
+            // `.dead` keeps the provider's real sprite, just greyed out and dimmed
+            // so it reads as "offline" without needing a baked dead row.
+            .saturation(mood == .dead ? 0 : 1)
+            .opacity(mood == .dead ? 0.5 : 1)
+    }
+
+    @ViewBuilder private var spriteContent: some View {
         if let spriteName, sheet != nil,
            let cg = SpriteSheetStore.recoloredFrame(
-               name: spriteName, row: mood.spriteRow, col: frameIndex, accentHex: palette.B
+               name: spriteName, row: mood.spriteRow,
+               col: mood == .dead ? 0 : frameIndex, // freeze the frame when offline
+               accentHex: palette.B
            ) {
             Image(decorative: cg, scale: 1)
                 .interpolation(.high)

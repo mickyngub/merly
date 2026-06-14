@@ -103,19 +103,42 @@ struct ProviderCardView: View {
 
             if editing {
                 DeleteButton(action: onDelete)
+            } else if snapshot.isUnavailable {
+                noDataBadge
             } else {
                 RingView(pct: snapshot.sessionPct, accent: accent, estimated: snapshot.isEstimated)
             }
         }
     }
 
+    /// Stand-in for the ring when there's no data to plot — a muted dash so the
+    /// card doesn't imply a real 0%.
+    private var noDataBadge: some View {
+        ZStack {
+            Circle().stroke(theme.track, lineWidth: 4.5)
+            Text("—")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(theme.text3)
+        }
+        .frame(width: 38, height: 38)
+        .padding(6)
+        .overlay(alignment: .bottom) {
+            Text("no data")
+                .font(.system(size: 9.5))
+                .foregroundStyle(theme.text2)
+                .offset(y: 7)
+        }
+    }
+
     private var resetLine: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 4) {
-                Image(systemName: "clock")
+                Image(systemName: snapshot.isUnavailable ? "bolt.slash" : "clock")
                     .font(.system(size: 10))
                     .foregroundStyle(theme.text3)
-                if let resetAt = snapshot.sessionResetAt {
+                if snapshot.isUnavailable {
+                    Text("No data")
+                } else if let resetAt = snapshot.sessionResetAt {
                     Text("Resets in \(Self.duration(until: resetAt, now: context.date))")
                 } else {
                     Text("No active session")
@@ -134,33 +157,10 @@ struct ProviderCardView: View {
                 .frame(height: 0.5)
                 .padding(.top, 11)
 
-            // Current session (5h window) — the same figure as the ring, shown
-            // as a labeled bar so it sits alongside the weekly limits.
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                UsageBar(
-                    label: "Current session",
-                    pct: snapshot.sessionPct,
-                    caption: snapshot.sessionResetAt.map {
-                        "5h limit · resets in \(Self.duration(until: $0, now: context.date))"
-                    } ?? "5h limit · no active session",
-                    accent: accent,
-                    estimated: snapshot.isEstimated
-                )
-            }
-
-            if !snapshot.weekly.isEmpty {
-                Text("Weekly limits")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .tracking(0.4)
-                    .textCase(.uppercase)
-                    .foregroundStyle(theme.text3)
-                    .padding(.top, 1)
-            }
-            ForEach(snapshot.weekly) { metric in
-                UsageBar(
-                    label: metric.label, pct: metric.pct, caption: metric.resetText,
-                    accent: accent, estimated: snapshot.isEstimated
-                )
+            if snapshot.isUnavailable {
+                noDataDetail
+            } else {
+                usageDetail
             }
 
             HStack(spacing: 6) {
@@ -169,7 +169,7 @@ struct ProviderCardView: View {
                 Text(snapshot.config.dir)
                     .font(.system(size: 11, design: .monospaced))
                 Spacer(minLength: 6)
-                if let note = snapshot.note {
+                if !snapshot.isUnavailable, let note = snapshot.note {
                     Text(note)
                         .font(.system(size: 10.5))
                         .foregroundStyle(theme.text3)
@@ -180,6 +180,53 @@ struct ProviderCardView: View {
         }
         .padding(.top, 1)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Expanded body when the login lapsed: no fabricated bars, just the state
+    /// and a one-line nudge on how to get data back.
+    private var noDataDetail: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("No usage data")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(theme.text)
+            if let note = snapshot.note {
+                Text(note)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(theme.text2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var usageDetail: some View {
+        // Current session (5h window) — the same figure as the ring, shown
+        // as a labeled bar so it sits alongside the weekly limits.
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            UsageBar(
+                label: "Current session",
+                pct: snapshot.sessionPct,
+                caption: snapshot.sessionResetAt.map {
+                    "5h limit · resets in \(Self.duration(until: $0, now: context.date))"
+                } ?? "5h limit · no active session",
+                accent: accent,
+                estimated: snapshot.isEstimated
+            )
+        }
+
+        if !snapshot.weekly.isEmpty {
+            Text("Weekly limits")
+                .font(.system(size: 10.5, weight: .semibold))
+                .tracking(0.4)
+                .textCase(.uppercase)
+                .foregroundStyle(theme.text3)
+                .padding(.top, 1)
+        }
+        ForEach(snapshot.weekly) { metric in
+            UsageBar(
+                label: metric.label, pct: metric.pct, caption: metric.resetText,
+                accent: accent, estimated: snapshot.isEstimated
+            )
+        }
     }
 
     static func duration(until end: Date, now: Date) -> String {

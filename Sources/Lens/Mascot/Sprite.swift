@@ -6,6 +6,10 @@ import SwiftUI
 
 enum Mood: String, Comparable {
     case happy, content, tired, stressed, sleeping, excited, wink, curious
+    /// No usage signal at all — the login lapsed (expired / signed out). Renders
+    /// the provider's real sprite greyed out and dimmed (see `MascotView`), since
+    /// the baked sheets have no dead row of their own.
+    case dead
 
     static func from(pct: Double) -> Mood {
         if pct >= 88 { return .stressed }
@@ -24,6 +28,7 @@ enum Mood: String, Comparable {
         case .excited: "GO!"
         case .wink: "WINK"
         case .curious: "HMM?"
+        case .dead: "OFFLINE"
         }
     }
 
@@ -37,6 +42,7 @@ enum Mood: String, Comparable {
         case .excited: Color(hex: 0xD97B20)
         case .wink: Color(hex: 0x8B5CF6)
         case .curious: Color(hex: 0x0891B2)
+        case .dead: Color(hex: 0x8A8A8E)
         }
     }
 
@@ -50,23 +56,27 @@ enum Mood: String, Comparable {
         case .excited: Color(hex: 0xFF9B3D, alpha: 0.18)
         case .wink: Color(hex: 0x8B5CF6, alpha: 0.15)
         case .curious: Color(hex: 0x06B6D4, alpha: 0.15)
+        case .dead: Color(hex: 0x8A8A8E, alpha: 0.15)
         }
     }
 
-    // Pressure rank for Comparable — sleeping/excited/wink/curious sit at the happy level.
+    // Pressure rank for Comparable — sleeping/excited/wink/curious/dead sit at
+    // the happy level (no usage pressure to escalate the mood).
     private var rank: Int {
         switch self {
-        case .sleeping, .excited, .wink, .curious: 0
+        case .sleeping, .excited, .wink, .curious, .dead: 0
         case .happy: 1; case .content: 2; case .tired: 3; case .stressed: 4
         }
     }
     static func < (lhs: Mood, rhs: Mood) -> Bool { lhs.rank < rhs.rank }
 
     /// Row index into a sprite sheet (top→bottom: happy, content, tired, stressed, sleeping, excited, wink, curious).
+    /// `.dead` has no row of its own; it borrows row 0 and `MascotView` greys it out.
     var spriteRow: Int {
         switch self {
         case .happy: 0; case .content: 1; case .tired: 2; case .stressed: 3
         case .sleeping: 4; case .excited: 5; case .wink: 6; case .curious: 7
+        case .dead: 0
         }
     }
 
@@ -210,8 +220,8 @@ enum SpriteBuilder {
 
     private static func stampFace(_ g: inout SpriteGrid, mood: Mood, blink: Bool) {
         let lx = 6, rx = 9 // eye columns
-        // sleeping/wink already have intentional eye states — don't let blink overwrite them
-        if blink, mood != .stressed, mood != .sleeping, mood != .wink {
+        // sleeping/wink/dead already have intentional eye states — don't let blink overwrite them
+        if blink, mood != .stressed, mood != .sleeping, mood != .wink, mood != .dead {
             g.set(lx, 8, "E"); g.set(rx, 8, "E")
             g.set(7, 11, "M"); g.set(8, 11, "M") // flat smile underneath stays
             return
@@ -255,6 +265,11 @@ enum SpriteBuilder {
             g.set(7, 7, "E"); g.set(10, 7, "E")                                    // eyes shifted up-right
             g.set(12, 5, "S"); g.set(12, 6, "S")                                   // small ! dot (noticing something)
             g.set(7, 11, "M"); g.set(8, 11, "M")                                   // flat mouth
+        case .dead:
+            // knocked-out "X" eyes + flat mouth (login lapsed — no data)
+            g.set(5, 7, "E"); g.set(7, 7, "E"); g.set(6, 8, "E"); g.set(5, 9, "E"); g.set(7, 9, "E") // left ✕
+            g.set(8, 7, "E"); g.set(10, 7, "E"); g.set(9, 8, "E"); g.set(8, 9, "E"); g.set(10, 9, "E") // right ✕
+            g.set(7, 12, "M"); g.set(8, 12, "M")                                    // low flat mouth
         }
     }
 }
