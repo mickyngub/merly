@@ -24,9 +24,7 @@ struct AddProviderForm: View {
     @State private var account: String
     @State private var dir: String
     @State private var dirEdited: Bool
-    @State private var paletteName: String
-    /// Tracks a manual color pick so auto-suggestion stops overriding it when the kind changes.
-    @State private var paletteEdited: Bool
+    @State private var colorSlot: Int
     /// Resolved sprite selection for the edit-mode mascot picker; "" is the drawn critter.
     @State private var sprite: String
     /// Drawn-critter style for the edit-mode mascot picker (ignored while a sprite is chosen).
@@ -45,12 +43,11 @@ struct AddProviderForm: View {
         _account = State(initialValue: editing?.account ?? "")
         _dir = State(initialValue: editing?.dir ?? kind.defaultDir)
         _dirEdited = State(initialValue: editing != nil)
-        // Adding a provider defaults to a color no existing provider uses, so a
+        // Adding a provider defaults to the next deck slot (append position), so a
         // second account of the same kind (e.g. Claude Personal + Work) is
-        // visually distinct out of the box. Editing keeps the saved color.
-        _paletteName = State(initialValue:
-            editing?.palette ?? Self.suggestedPalette(kind: kind, existing: engine.appConfig.providers))
-        _paletteEdited = State(initialValue: editing != nil)
+        // visually distinct out of the box. Editing keeps the provider's slot.
+        _colorSlot = State(initialValue:
+            editing?.resolvedColorSlot ?? ((engine.appConfig.providers.count + 1) % Fate.deckSize))
         _style = State(initialValue: editing?.resolvedStyle ?? .cat)
         // Mirror the menu bar editor: an explicit "" means drawn, nil falls back
         // to the kind's default art, any other value is a chosen sprite sheet.
@@ -62,7 +59,7 @@ struct AddProviderForm: View {
             HStack(spacing: 10) {
                 MascotView(
                     style: previewStyle,
-                    palette: MascotPalette.preset(paletteName),
+                    palette: previewPalette,
                     mood: .happy,
                     px: 36,
                     bob: false,
@@ -72,6 +69,15 @@ struct AddProviderForm: View {
                 Text(isEditing ? "Edit provider" : "New provider")
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(theme.text)
+                if editing?.isShiny == true {
+                    Label("Shiny", systemImage: "sparkles")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .foregroundStyle(Color(hex: 0xB8860B))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(hex: 0xFFD23D, alpha: 0.18), in: Capsule())
+                        .help("This mascot caught a rare shiny color.")
+                }
                 Spacer(minLength: 0)
                 IconButton(systemName: "xmark", action: onDone)
             }
@@ -87,9 +93,6 @@ struct AddProviderForm: View {
                 .onChange(of: kind) { old, new in
                     if name == old.displayName || name.isEmpty { name = new.displayName }
                     if !dirEdited { dir = new.defaultDir }
-                    if !paletteEdited {
-                        paletteName = Self.suggestedPalette(kind: new, existing: engine.appConfig.providers)
-                    }
                 }
             }
 
@@ -124,7 +127,7 @@ struct AddProviderForm: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
-                            canSave ? MascotPalette.preset(paletteName).accent : theme.track,
+                            canSave ? previewPalette.accent : theme.track,
                             in: Capsule()
                         )
                 }
@@ -197,8 +200,8 @@ struct AddProviderForm: View {
         VStack(alignment: .leading, spacing: 5) {
             fieldLabel("Color")
             HStack(spacing: 7) {
-                ForEach(MascotPalette.presetOrder, id: \.self) { presetName in
-                    paletteSwatch(presetName)
+                ForEach(0 ..< Fate.deckSize, id: \.self) { slot in
+                    paletteSwatch(slot)
                 }
                 Spacer(minLength: 0)
             }
@@ -228,6 +231,12 @@ struct AddProviderForm: View {
         return kind.spriteFamily.first?.id
     }
 
+    /// The mascot preview's palette: the picked deck hue, gleaming if the provider
+    /// being edited is a fated shiny.
+    private var previewPalette: MascotPalette {
+        Fate.palette(slot: colorSlot, shiny: editing?.isShiny ?? false)
+    }
+
     private func fieldLabel(_ title: String) -> some View {
         Text(title.uppercased())
             .font(.system(size: 9.5, weight: .semibold))
@@ -254,7 +263,7 @@ struct AddProviderForm: View {
 
     private func spriteThumb(_ id: String, label: String) -> some View {
         let selected = sprite == id
-        let palette = MascotPalette.preset(paletteName)
+        let palette = previewPalette
         return VStack(spacing: 3) {
             Button { sprite = id } label: {
                 ZStack {
@@ -282,22 +291,13 @@ struct AddProviderForm: View {
         }
     }
 
-    /// A color no existing provider already uses, so a new provider is distinct
-    /// by default. Prefers the kind's signature color when it's still free.
-    private static func suggestedPalette(kind: ProviderKind, existing: [ProviderConfig]) -> String {
-        let used = Set(existing.map { $0.palette ?? $0.kind.defaultPaletteName })
-        if !used.contains(kind.defaultPaletteName) { return kind.defaultPaletteName }
-        return MascotPalette.presetOrder.first { !used.contains($0) } ?? kind.defaultPaletteName
-    }
-
-    private func paletteSwatch(_ presetName: String) -> some View {
-        let selected = presetName == paletteName
+    private func paletteSwatch(_ slot: Int) -> some View {
+        let selected = slot == colorSlot
         return Button {
-            paletteName = presetName
-            paletteEdited = true
+            colorSlot = slot
         } label: {
             Circle()
-                .fill(MascotPalette.preset(presetName).accent)
+                .fill(MascotPalette.fromHue(Fate.deckHue(slot: slot)).accent)
                 .frame(width: 16, height: 16)
                 .overlay(
                     Circle().strokeBorder(
@@ -308,7 +308,7 @@ struct AddProviderForm: View {
                 )
         }
         .buttonStyle(.plain)
-        .help(presetName)
+        .help("Color \(slot + 1)")
     }
 
     // MARK: actions
@@ -364,12 +364,12 @@ struct AddProviderForm: View {
                 kind: editing.kind,
                 dir: editing.dir,
                 style: style,
-                palette: paletteName,
+                colorSlot: colorSlot,
                 sprite: sprite
             )
         } else {
             // New providers use their kind's default sprite (nil → resolved),
-            // tinted by the chosen color.
+            // tinted by the chosen deck color.
             provider = ProviderConfig(
                 id: newID(name: trimmedName, account: trimmedAccount),
                 name: trimmedName,
@@ -377,11 +377,12 @@ struct AddProviderForm: View {
                 kind: kind,
                 dir: dir.trimmingCharacters(in: .whitespaces),
                 style: nil,
-                palette: paletteName,
+                colorSlot: colorSlot,
                 sprite: nil
             )
         }
-        // Preserve any manual token-limit overrides set outside the form.
+        // Preserve manual token-limit overrides the form doesn't expose (rebuilding
+        // from fields would reset them). Color/shiny are fated, not stored.
         provider.sessionTokenLimit = editing?.sessionTokenLimit
         provider.weeklyTokenLimit = editing?.weeklyTokenLimit
         if editing == nil {

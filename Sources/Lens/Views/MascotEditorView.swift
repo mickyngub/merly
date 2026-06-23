@@ -52,11 +52,11 @@ private struct DefaultMascotRow: View {
             subtitle: "Default mascot",
             style: mascot.style,
             palette: mascot.resolvedPalette,
-            paletteName: mascot.palette,
+            colorSlot: mascot.resolvedColorSlot,
             sprite: mascot.sprite,
             sheets: sheets,
             setSprite: { var m = mascot; m.sprite = $0; engine.updateDefaultMascot(m) },
-            setPalette: { var m = mascot; m.palette = $0; engine.updateDefaultMascot(m) },
+            setSlot: { var m = mascot; m.colorSlot = $0; engine.updateDefaultMascot(m) },
             setStyle: { var m = mascot; m.style = $0; engine.updateDefaultMascot(m) }
         )
     }
@@ -70,12 +70,13 @@ private struct MascotControls: View {
     let subtitle: String?
     let style: MascotStyle
     let palette: MascotPalette
-    let paletteName: String
+    /// Index into the fated deck (see `Fate`); the swatches show that deck's hues.
+    let colorSlot: Int
     /// Resolved selection; "" means the drawn critter.
     let sprite: String
     let sheets: [(id: String, label: String)]
     let setSprite: (String) -> Void
-    let setPalette: (String) -> Void
+    let setSlot: (Int) -> Void
     let setStyle: (MascotStyle) -> Void
     @Environment(\.theme) private var theme
 
@@ -113,8 +114,8 @@ private struct MascotControls: View {
             }
 
             HStack(spacing: 7) {
-                ForEach(MascotPalette.presetOrder, id: \.self) { name in
-                    paletteSwatch(name)
+                ForEach(0 ..< Fate.deckSize, id: \.self) { slot in
+                    paletteSwatch(slot)
                 }
                 Spacer(minLength: 0)
             }
@@ -166,11 +167,11 @@ private struct MascotControls: View {
         }
     }
 
-    private func paletteSwatch(_ name: String) -> some View {
-        let selected = name == paletteName
-        return Button { setPalette(name) } label: {
+    private func paletteSwatch(_ slot: Int) -> some View {
+        let selected = slot == colorSlot
+        return Button { setSlot(slot) } label: {
             Circle()
-                .fill(MascotPalette.preset(name).accent)
+                .fill(MascotPalette.fromHue(Fate.deckHue(slot: slot)).accent)
                 .frame(width: 16, height: 16)
                 .overlay(
                     Circle().strokeBorder(selected ? theme.text : .clear, lineWidth: 1.5)
@@ -178,6 +179,6 @@ private struct MascotControls: View {
                 )
         }
         .buttonStyle(.plain)
-        .help(name)
+        .help("Color \(slot + 1)")
     }
 }

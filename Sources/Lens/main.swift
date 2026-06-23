@@ -53,7 +53,9 @@ func printSnapshots() {
             ProviderCardView.duration(until: $0, now: now)
         } ?? "—"
         let kindNote = snap.isUnavailable ? "no data" : snap.isStale ? "reported (stale)" : snap.isEstimated ? "estimated" : "reported"
-        print("● \(provider.name) · \(provider.account)  (\(provider.dir))")
+        let shinyMark = provider.isShiny ? " ✨shiny" : ""
+        let planMark = snap.plan.map { " — \($0)" } ?? ""
+        print("● \(provider.name) · \(provider.account)\(planMark)\(shinyMark)  (\(provider.dir))")
         print("   session: \(Int(snap.sessionPct.rounded()))% used [\(snap.mood.tagWord)] · resets in \(reset) · \(kindNote)\(snap.isActive ? " · ACTIVE" : "")")
         for metric in snap.weekly {
             print("   \(metric.label): \(Int(metric.pct.rounded()))% used · \(metric.resetText)")

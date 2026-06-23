@@ -168,7 +168,7 @@ struct ClaudeReader: UsageReader {
                 weekly: weekly,
                 isActive: recentActivity(under: projectsRoot, now: now),
                 isEstimated: false,
-                note: usage.planLabel
+                plan: usage.planLabel
             )
         }, fallback: { error in
             // Login lapsed → genuinely no data. Don't fall back to the
@@ -282,7 +282,7 @@ struct CodexReader: UsageReader {
                 weekly: Array(weekly.prefix(4)),
                 isActive: recentActivity(under: sessionsRoot, now: now),
                 isEstimated: false,
-                note: usage.planLabel
+                plan: usage.planLabel
             )
         }, fallback: { _ in
             // Codex rollout files carry real rate_limits events, so the offline
@@ -344,14 +344,14 @@ struct CodexReader: UsageReader {
             ))
         }
 
-        let plan = limits["plan_type"] as? String
+        let plan = (limits["plan_type"] as? String)?.capitalized
         let active = files.contains { now.timeIntervalSince($0.mtime) < activeThreshold }
         let ageMin = Int(now.timeIntervalSince(eventDate) / 60)
-        let note = plan.map { ageMin > 60 ? "\($0) · as of \(ageMin / 60)h ago" : $0 }
 
         return ProviderSnapshot(
             config: config, sessionPct: sessionPct, sessionResetAt: sessionResetAt,
-            weekly: weekly, isActive: active, isEstimated: true, note: note
+            weekly: weekly, isActive: active, isEstimated: true,
+            note: ageMin > 60 ? "as of \(ageMin / 60)h ago" : nil, plan: plan
         )
     }
 
@@ -412,7 +412,7 @@ struct KimiReader: UsageReader {
                 weekly: weekly,
                 isActive: recentActivity(under: sessionsRoot, now: now),
                 isEstimated: false,
-                note: usage.planLabel
+                plan: usage.planLabel
             )
         }, fallback: { error in
             if error?.isAuthLapse == true {

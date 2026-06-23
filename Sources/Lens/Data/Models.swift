@@ -27,14 +27,6 @@ enum ProviderKind: String, Codable, CaseIterable {
         }
     }
 
-    var defaultPaletteName: String {
-        switch self {
-        case .claude: "coral"
-        case .codex: "green"
-        case .kimi: "purple"
-        }
-    }
-
     /// Sprite sheets this kind's mascot may use — its own family only, so the
     /// editor can't dress a Claude provider up as Codex/Kimi. One art per kind:
     /// color is set by the palette (the old "Work" sprite was just a blue Clawd).
@@ -52,15 +44,92 @@ enum ProviderKind: String, Codable, CaseIterable {
 /// provider's pressure.
 struct DefaultMascot: Codable, Equatable {
     var style: MascotStyle
-    var palette: String
+    /// User-chosen index into the fated deck (see `Fate`). The deck's *hues* are
+    /// fixed per machine; only this mapping is editable. Optional so older configs
+    /// decode (absent → the signature slot 0).
+    var colorSlot: Int?
     /// Bundled sprite-sheet basename; "" renders the drawn critter instead.
     var sprite: String
 
-    static let standard = DefaultMascot(style: .cat, palette: "coral", sprite: "clawd-sprite")
+    static let standard = DefaultMascot(style: .cat, sprite: "clawd-sprite")
 
     /// Sprite sheet to render, or nil when drawing the critter.
     var resolvedSprite: String? { sprite.isEmpty ? nil : sprite }
-    var resolvedPalette: MascotPalette { MascotPalette.preset(palette) }
+
+    /// The menu bar mascot sits in deck slot 0 by default — the install's
+    /// signature hue — so adding or removing providers never recolors it.
+    var resolvedColorSlot: Int { colorSlot ?? 0 }
+
+    /// Fate's one-shot shiny verdict for the menu bar mascot.
+    var isShiny: Bool { Fate.isShiny(id: "menu-bar-mascot") }
+
+    var resolvedPalette: MascotPalette { Fate.palette(slot: resolvedColorSlot, shiny: isShiny) }
+}
+
+/// Per-install destiny for a mascot's color and shininess. Everything derives
+/// deterministically from the home path — there is no stored seed, so a mascot's
+/// fate can't be re-rolled by deleting or editing providers.json. Reinstalling
+/// macOS or changing username gives a new fate; that's the only thing that does.
+///
+/// **Color** is a "deck": one signature `base` hue per machine, then evenly
+/// spread golden-angle hues for each `slot`. The deck's hues are fixed; which
+/// `slot` a mascot wears is the only editable part (stored as `colorSlot`).
+///
+/// **Shiny** is a one-shot lottery keyed by mascot id (independent of color, so a
+/// mascot's luck never changes when others are added, removed, or recolored). The
+/// lucky few wear a gleaming `+150°` variant. No accumulation, no "moment of
+/// catching" — you either were born lucky on this machine or you weren't.
+enum Fate {
+    /// How many distinct hues the editor offers (the golden-angle deck size).
+    static let deckSize = 6
+    /// The most-separated rotation increment — successive slots are maximally apart.
+    static let goldenAngle = 137.50776405003785
+
+    /// 1-in-N one-shot shiny odds. `LENS_SHINY_RARITY` overrides it for tuning or
+    /// testing (set it to 1 to make every mascot shiny).
+    static var rarity: UInt64 {
+        if let raw = ProcessInfo.processInfo.environment["LENS_SHINY_RARITY"],
+           let n = UInt64(raw), n >= 1 { return n }
+        return 128
+    }
+
+    /// The install's signature hue (0..<360), hashed from the home path.
+    static func baseHue(home: String = NSHomeDirectory()) -> Double {
+        Double(hash(home) % 360)
+    }
+
+    /// Golden-angle deck hue for `slot`: base + slot×137.5°. Evenly spread and
+    /// append-stable — a new mascot takes the next slot without moving earlier ones.
+    static func deckHue(slot: Int, home: String = NSHomeDirectory()) -> Double {
+        (baseHue(home: home) + Double(slot) * goldenAngle)
+            .truncatingRemainder(dividingBy: 360)
+    }
+
+    /// The resolved palette for a mascot in `slot`, gleaming if `shiny`.
+    static func palette(slot: Int, shiny: Bool, home: String = NSHomeDirectory()) -> MascotPalette {
+        let hue = deckHue(slot: slot, home: home)
+        return shiny
+            ? .fromHue(hue + 150, satBoost: 0.08, lightBoost: 0.04)
+            : .fromHue(hue)
+    }
+
+    /// One-shot shiny verdict, keyed by mascot id. Stable forever.
+    static func isShiny(id: String, home: String = NSHomeDirectory()) -> Bool {
+        hash("\(home)|\(id)|shiny") % rarity == 0
+    }
+
+    /// Stable per-id deck slot, used only as a safety fallback when a mascot has
+    /// no stored slot yet (normal slots are assigned at creation/migration).
+    static func fallbackSlot(id: String, home: String = NSHomeDirectory()) -> Int {
+        Int(hash("\(home)|\(id)|slot") % UInt64(deckSize))
+    }
+
+    /// FNV-1a over the string's UTF-8 → uniform-ish 64-bit.
+    private static func hash(_ s: String) -> UInt64 {
+        var h: UInt64 = 0xcbf29ce484222325
+        for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        return h
+    }
 }
 
 struct ProviderConfig: Codable, Identifiable, Equatable {
@@ -70,7 +139,10 @@ struct ProviderConfig: Codable, Identifiable, Equatable {
     var kind: ProviderKind
     var dir: String
     var style: MascotStyle?
-    var palette: String?
+    /// User-chosen index into the fated deck (see `Fate`); the deck's hues are
+    /// fixed per machine, only this mapping is editable. Optional so older configs
+    /// decode (absent → a slot assigned by position on first load).
+    var colorSlot: Int?
     /// Bundled sprite-sheet basename (4×4 grid: rows = mood, cols = idle frames).
     /// When resolvable, the panel mascot renders this art instead of the drawn critter.
     var sprite: String?
@@ -92,14 +164,14 @@ struct ProviderConfig: Codable, Identifiable, Equatable {
         }
     }
 
-    var resolvedPalette: MascotPalette {
-        if let palette { return MascotPalette.preset(palette) }
-        switch kind {
-        case .claude: return MascotPalette.preset("coral")
-        case .codex: return MascotPalette.preset("green")
-        case .kimi: return MascotPalette.preset("purple")
-        }
-    }
+    /// The deck slot this provider wears, falling back to a stable per-id slot
+    /// until the position-based default is persisted (see `ConfigStore.migrate`).
+    var resolvedColorSlot: Int { colorSlot ?? Fate.fallbackSlot(id: id) }
+
+    /// Fate's one-shot shiny verdict for this provider.
+    var isShiny: Bool { Fate.isShiny(id: id) }
+
+    var resolvedPalette: MascotPalette { Fate.palette(slot: resolvedColorSlot, shiny: isShiny) }
 
     /// Sprite sheet to render in the panel, falling back to the per-kind default
     /// art. Returns nil only if a provider explicitly opts out via sprite: "".
@@ -140,8 +212,12 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// data*. The card shows a "No data" state and the mascot goes `.dead`
     /// instead of inventing a "vs your busiest week" estimate that reads as real.
     var isUnavailable: Bool = false
-    /// Optional note (e.g. Codex plan type, or why data is missing).
+    /// Optional note (e.g. why data is missing, or how fresh a cached reading is).
     var note: String?
+    /// The provider's subscription tier (e.g. "Max (20x)", "Pro", "Team (5x)"),
+    /// shown as a pill beside the provider name. Nil when the provider exposes no
+    /// plan info (token-estimated providers) or its login has lapsed.
+    var plan: String? = nil
 
     var id: String { config.id }
 
@@ -183,7 +259,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
         guard !isEstimated, !isStale, !isUnavailable else { return nil }
         return RealReading(
             sessionPct: sessionPct, sessionResetAt: sessionResetAt,
-            weekly: weekly, planNote: note, capturedAt: now
+            weekly: weekly, planNote: plan, capturedAt: now
         )
     }
 
@@ -191,10 +267,10 @@ struct ProviderSnapshot: Identifiable, Equatable {
     static func fromCache(_ reading: RealReading, config: ProviderConfig, now: Date) -> ProviderSnapshot {
         let age = Int(now.timeIntervalSince(reading.capturedAt) / 60)
         let ageText = age < 1 ? "moments ago" : age < 60 ? "\(age)m ago" : "\(age / 60)h ago"
-        let note = [reading.planNote, "as of \(ageText)"].compactMap(\.self).joined(separator: " · ")
         return ProviderSnapshot(
             config: config, sessionPct: reading.sessionPct, sessionResetAt: reading.sessionResetAt,
-            weekly: reading.weekly, isActive: false, isEstimated: false, isStale: true, note: note
+            weekly: reading.weekly, isActive: false, isEstimated: false, isStale: true,
+            note: "as of \(ageText)", plan: reading.planNote
         )
     }
 }
@@ -276,16 +352,16 @@ struct AppConfig: Codable {
     /// static default and first-run auto-detection.
     static let knownProviders: [(config: ProviderConfig, markers: [String])] = [
         (ProviderConfig(id: "claude-personal", name: "Claude", account: "Personal",
-                        kind: .claude, dir: "~/.claude", style: .cat, palette: "coral"),
+                        kind: .claude, dir: "~/.claude", style: .cat, colorSlot: 1),
          ["~/.claude/projects", "~/.claude.json"]),
         (ProviderConfig(id: "claude-work", name: "Claude", account: "Work",
-                        kind: .claude, dir: "~/.claude-work", style: .catTie, palette: "steel"),
+                        kind: .claude, dir: "~/.claude-work", style: .catTie, colorSlot: 2),
          ["~/.claude-work/projects", "~/.claude-work.json"]),
         (ProviderConfig(id: "codex", name: "Codex", account: "OpenAI",
-                        kind: .codex, dir: "~/.codex", style: .robot, palette: "green"),
+                        kind: .codex, dir: "~/.codex", style: .robot, colorSlot: 3),
          ["~/.codex/auth.json"]),
         (ProviderConfig(id: "kimi", name: "Kimi", account: "Moonshot",
-                        kind: .kimi, dir: "~/.kimi-code", style: .round, palette: "purple"),
+                        kind: .kimi, dir: "~/.kimi-code", style: .round, colorSlot: 4),
          ["~/.kimi-code/credentials/kimi-code.json"]),
     ]
 
@@ -352,6 +428,17 @@ enum ConfigStore {
         }
         if config.defaultMascot?.sprite == "clawd-work-sprite" {
             config.defaultMascot?.sprite = "clawd-sprite"
+            changed = true
+        }
+        // Assign each mascot a default deck slot by position the first time we see
+        // a config without one (menu bar = 0; providers spread 1..N). The slot is
+        // editable afterward; the deck's hues stay fated. See `Fate`.
+        for i in config.providers.indices where config.providers[i].colorSlot == nil {
+            config.providers[i].colorSlot = (i + 1) % Fate.deckSize
+            changed = true
+        }
+        if config.defaultMascot != nil, config.defaultMascot?.colorSlot == nil {
+            config.defaultMascot?.colorSlot = 0
             changed = true
         }
         return changed

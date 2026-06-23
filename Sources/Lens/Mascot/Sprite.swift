@@ -120,21 +120,50 @@ struct MascotPalette: Codable, Equatable {
 
     var accent: Color { Color(hex: B) }
 
-    static let presets: [String: MascotPalette] = [
-        "coral":  .init(B: 0xE8825C, D: 0xC2603C, L: 0xF7CBB4, O: 0x80391F, E: 0x3A2416, W: 0xFFFFFF, M: 0x8A3D24, C: 0xFF9C7E, S: 0x8FBFFF, A: 0xF7CBB4),
-        "steel":  .init(B: 0x5E80AC, D: 0x3F5C84, L: 0xC6D7EC, O: 0x2B3F5C, E: 0x1E2A3A, W: 0xFFFFFF, M: 0x2B3F5C, C: 0xF0A2AE, S: 0x8FBFFF, A: 0xE8825C),
-        "green":  .init(B: 0x41A87C, D: 0x2C7E5A, L: 0xBFE8D2, O: 0x1B5239, E: 0x143526, W: 0xFFFFFF, M: 0x1B5239, C: 0x79D6A8, S: 0x8FBFFF, A: 0xA8ECC8),
-        "purple": .init(B: 0x8C6DE2, D: 0x6A4CC2, L: 0xDBCCF7, O: 0x432D85, E: 0x281A4D, W: 0xFFFFFF, M: 0x432D85, C: 0xF0A2D6, S: 0x8FBFFF, A: 0xF5D67A),
-        // extra presets so a 5th/6th provider is just a name in providers.json
-        "gold":   .init(B: 0xE0A83D, D: 0xB8842A, L: 0xF7E3B4, O: 0x7A5212, E: 0x3A2C10, W: 0xFFFFFF, M: 0x8A5F18, C: 0xFFC97E, S: 0x8FBFFF, A: 0xF7E3B4),
-        "pink":   .init(B: 0xE06A9F, D: 0xBC4A7E, L: 0xF7C2DA, O: 0x7E2450, E: 0x3A1426, W: 0xFFFFFF, M: 0x8A2B58, C: 0xFF9CC4, S: 0x8FBFFF, A: 0xF7C2DA),
-    ]
+    /// A full critter palette generated from a single hue (degrees). Saturation
+    /// and lightness are pinned per channel to pleasant bands, so *any* hue yields
+    /// a readable mascot — no mud, no neon. `satBoost`/`lightBoost` nudge every
+    /// generated channel: the shiny "gleam". The sweat drop keeps its universal
+    /// blue and the eye-white stays white regardless of hue. Sprite mascots tint
+    /// toward `B` (see `SpriteRecolor`); the rest drive the drawn critter.
+    static func fromHue(_ hue: Double, satBoost: Double = 0, lightBoost: Double = 0) -> MascotPalette {
+        func ch(_ s: Double, _ l: Double) -> UInt32 {
+            hslHex(h: hue, s: min(1, max(0, s + satBoost)), l: min(1, max(0, l + lightBoost)))
+        }
+        return MascotPalette(
+            B: ch(0.62, 0.62),   // body
+            D: ch(0.55, 0.47),   // dark shade
+            L: ch(0.70, 0.84),   // light belly
+            O: ch(0.58, 0.28),   // outline
+            E: ch(0.40, 0.14),   // eye — near-black, faintly hue-tinted
+            W: 0xFFFFFF,         // eye-white
+            M: ch(0.58, 0.28),   // mouth (= outline)
+            C: ch(0.82, 0.75),   // cheek blush
+            S: 0x8FBFFF,         // sweat drop — fixed blue
+            A: ch(0.70, 0.84)    // accessory (= light belly)
+        )
+    }
 
-    /// Stable display order for palette pickers (dictionaries don't keep one).
-    static let presetOrder = ["coral", "steel", "green", "purple", "gold", "pink"]
-
-    static func preset(_ name: String?) -> MascotPalette {
-        presets[name ?? "coral"] ?? presets["coral"]!
+    /// HSL (h in degrees, s & l in 0...1) → packed 0xRRGGBB.
+    static func hslHex(h: Double, s: Double, l: Double) -> UInt32 {
+        let hh = (h.truncatingRemainder(dividingBy: 360) + 360)
+            .truncatingRemainder(dividingBy: 360) / 360
+        let q = l < 0.5 ? l * (1 + s) : l + s - l * s
+        let p = 2 * l - q
+        func toRGB(_ t0: Double) -> Double {
+            var t = t0
+            if t < 0 { t += 1 }
+            if t > 1 { t -= 1 }
+            if t < 1.0 / 6 { return p + (q - p) * 6 * t }
+            if t < 1.0 / 2 { return q }
+            if t < 2.0 / 3 { return p + (q - p) * (2.0 / 3 - t) * 6 }
+            return p
+        }
+        let r = s == 0 ? l : toRGB(hh + 1.0 / 3)
+        let g = s == 0 ? l : toRGB(hh)
+        let b = s == 0 ? l : toRGB(hh - 1.0 / 3)
+        func byte(_ v: Double) -> UInt32 { UInt32(min(255, max(0, (v * 255).rounded()))) }
+        return (byte(r) << 16) | (byte(g) << 8) | byte(b)
     }
 }
 

@@ -254,8 +254,27 @@ enum CodexUsageAPI {
                   let rl = extra["rate_limit"] as? [String: Any] else { continue }
             usage.additional.append((name, window(rl, "primary_window"), window(rl, "secondary_window")))
         }
-        usage.planLabel = (obj["plan_type"] as? String)?.capitalized
+        usage.planLabel = planLabel(obj["plan_type"] as? String)
         return usage
+    }
+
+    /// Map OpenAI's internal `plan_type` codes to the names people actually use.
+    /// The usage endpoint reports a billing bucket, not the marketed plan: the
+    /// rate-limited Pro tier comes back as "prolite", which capitalizes to the
+    /// nonsense "Prolite". Fall back to a tidy capitalization for unknown codes.
+    static func planLabel(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        switch raw.lowercased() {
+        case "free": return "Free"
+        case "plus": return "Plus"
+        case "pro": return "Pro"
+        case "prolite": return "Pro (5x)" // weekly-rate-limited Pro tier
+        case "team": return "Team"
+        case "business": return "Business"
+        case "enterprise": return "Enterprise"
+        case "edu": return "Edu"
+        default: return raw.capitalized
+        }
     }
 }
 

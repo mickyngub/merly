@@ -74,20 +74,42 @@ struct ProviderCardView: View {
                 }
             }
             .frame(width: 48, height: 48)
+            .overlay(alignment: .topLeading) {
+                if snapshot.config.isShiny {
+                    ShinySparkle()
+                        .help("Shiny! A rare mascot color.")
+                }
+            }
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Text(snapshot.config.name)
                         .font(.system(size: 14.5, weight: .semibold))
                         .tracking(-0.2)
                         .foregroundStyle(theme.text)
+                        .fixedSize()
                     Text(snapshot.config.account)
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(0.2)
                         .foregroundStyle(theme.text2)
-                        .padding(.horizontal, 6)
+                        .lineLimit(1)
+                        .padding(.horizontal, 5)
                         .padding(.vertical, 1.5)
                         .background(theme.chip, in: RoundedRectangle(cornerRadius: 6))
+                        .fixedSize()
+                    if let plan = snapshot.plan {
+                        Text(plan)
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(0.1)
+                            .foregroundStyle(accent)
+                            .lineLimit(1)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
+                            .fixedSize()
+                            .help("Subscription plan")
+                    }
+                    Spacer(minLength: 0)
                 }
                 resetLine
                 Text(snapshot.mood.tagWord)
@@ -304,6 +326,28 @@ struct DeleteButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Remove this provider")
+    }
+}
+
+/// Tiny twinkling star pinned to a caught-shiny mascot — the at-a-glance tell
+/// that its color is the rare variant, not just a chosen palette.
+struct ShinySparkle: View {
+    @State private var twinkle = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Image(systemName: "sparkles")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(Color(hex: 0xFFD23D))
+            .shadow(color: Color(hex: 0xFFB800, alpha: 0.8), radius: 2)
+            .scaleEffect(twinkle ? 1.0 : 0.82)
+            .opacity(twinkle ? 1.0 : 0.7)
+            .offset(x: -3, y: -3)
+            .onAppear { if !reduceMotion { twinkle = true } }
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 1.1).repeatForever(autoreverses: true),
+                value: twinkle
+            )
     }
 }
 
