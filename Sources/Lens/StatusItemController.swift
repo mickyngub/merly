@@ -60,7 +60,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let mood = peak.map { $0.isUnavailable ? .happy : $0.mood } ?? .happy
         button.title = ""
         if mood != current?.mood { emote = nil } // real data beats a flourish
-        current = (mascot.resolvedSprite, mascot.style, mascot.resolvedPalette, mood)
+        // The icon evolves to the busiest pet's form (its mood already drives it).
+        let sprite = SpriteSheetStore.formSprite(base: mascot.resolvedSprite, form: peak?.game?.form ?? 0)
+        current = (sprite, mascot.style, mascot.resolvedPalette, mood)
         if let peak {
             let pct = Int(peak.pressurePct.rounded())
             button.toolTip = "\(peak.config.name) \(peak.config.account) — \(pct)% of closest limit used"

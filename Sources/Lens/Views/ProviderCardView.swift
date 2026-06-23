@@ -59,25 +59,46 @@ struct ProviderCardView: View {
                     .foregroundStyle(theme.text3)
                     .help("Drag to reorder")
             }
-            ZStack(alignment: .topTrailing) {
-                MascotView(
-                    style: snapshot.config.resolvedStyle,
-                    palette: snapshot.config.resolvedPalette,
-                    mood: snapshot.mood,
-                    px: 48,
-                    busy: snapshot.isActive,
-                    spriteName: snapshot.config.resolvedSprite
-                )
-                if snapshot.isActive {
-                    ActivityDot()
-                        .offset(x: 2, y: 1)
+            VStack(spacing: 3) {
+                ZStack {
+                    MascotView(
+                        style: snapshot.config.resolvedStyle,
+                        palette: snapshot.config.resolvedPalette,
+                        mood: snapshot.mood,
+                        px: 48,
+                        busy: snapshot.isActive,
+                        spriteName: snapshot.resolvedSpriteForm
+                    )
                 }
-            }
-            .frame(width: 48, height: 48)
-            .overlay(alignment: .topLeading) {
-                if snapshot.config.isShiny {
-                    ShinySparkle()
-                        .help("Shiny! A rare mascot color.")
+                .frame(width: 48, height: 48)
+                .overlay(alignment: .topLeading) {
+                    if snapshot.config.isShiny {
+                        ShinySparkle()
+                            .help("Shiny! A rare mascot color.")
+                    }
+                }
+                // Streak rides the top-right corner; the live-activity ping
+                // moves to bottom-right so the two don't fight for one spot.
+                .overlay(alignment: .topTrailing) {
+                    if let game = snapshot.game, !snapshot.isUnavailable, game.streakDays >= 2 {
+                        Text("🔥\(game.streakDays)")
+                            .font(.system(size: 9, weight: .heavy))
+                            .foregroundStyle(theme.text)
+                            .fixedSize()
+                            .offset(x: 7, y: -4)
+                            .help("\(game.streakDays)-day streak — consecutive days used")
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if snapshot.isActive {
+                        ActivityDot()
+                            .offset(x: 1, y: -1)
+                    }
+                }
+
+                // Level + XP as a tiny progress bar beneath the sprite.
+                if let game = snapshot.game, !snapshot.isUnavailable {
+                    MascotLevelBar(level: game.level, xp: game.xpInLevel, accent: accent)
                 }
             }
 
@@ -303,6 +324,37 @@ struct UsageBar: View {
                 .foregroundStyle(theme.text2)
                 .padding(.top, -1)
         }
+    }
+}
+
+/// Subtle level tell beneath the sprite: a tiny "Lv N" + XP progress bar.
+/// Deliberately small — leveling is a background flourish, not the headline.
+struct MascotLevelBar: View {
+    let level: Int
+    let xp: Double          // 0...1 toward next level
+    let accent: Color
+
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        HStack(spacing: 3.5) {
+            Text("Lv\(level)")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundStyle(theme.text2)
+                .fixedSize()
+            ZStack(alignment: .leading) {
+                Capsule().fill(theme.track)
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(accent)
+                        .frame(width: max(2, geo.size.width * xp))
+                        .animation(Theme.snappy(0.5), value: xp)
+                }
+            }
+            .frame(height: 3)
+        }
+        .frame(width: 52)
+        .help("Level \(level) · \(Int((xp * 100).rounded()))% to the next level")
     }
 }
 

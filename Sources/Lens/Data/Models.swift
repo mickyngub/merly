@@ -218,8 +218,21 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// shown as a pill beside the provider name. Nil when the provider exposes no
     /// plan info (token-estimated providers) or its login has lapsed.
     var plan: String? = nil
+    /// Derived idle-game stats (level, XP, streak, evolution form) computed from
+    /// the provider's lifetime log metadata. Stored, not computed: it needs file
+    /// I/O, so the reader fills it on the work queue (never lazily on the main
+    /// thread). Nil until computed / when the log tree is empty.
+    var game: GameStats? = nil
 
     var id: String { config.id }
+
+    /// Sprite sheet for the mascot's current evolution form, degrading to the
+    /// highest *available* lower form (and finally the base sheet) so the app
+    /// works before any tier art is bundled. Mood still picks the row; form
+    /// picks the sheet.
+    var resolvedSpriteForm: String? {
+        SpriteSheetStore.formSprite(base: config.resolvedSprite, form: game?.form ?? 0)
+    }
 
     /// How close this provider is to *any* of its limits — a session can be
     /// fresh (0%) while the weekly cap is nearly exhausted. Drives the mascot

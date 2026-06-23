@@ -60,6 +60,10 @@ func printSnapshots() {
         for metric in snap.weekly {
             print("   \(metric.label): \(Int(metric.pct.rounded()))% used · \(metric.resetText)")
         }
+        if let g = snap.game {
+            let mb = Double(g.lifetimeBytes) / 1_048_576
+            print("   game: Lv \(g.level) (\(Int((g.xpInLevel * 100).rounded()))% to next) · form \(g.form) · 🔥\(g.streakDays) · \(String(format: "%.0f", mb)) MB lifetime")
+        }
         if let note = snap.note { print("   note: \(note)") }
         print("")
     }

@@ -139,6 +139,25 @@ private func recentActivity(under root: URL, now: Date) -> Bool {
         .contains { now.timeIntervalSince($0.mtime) < activeThreshold }
 }
 
+/// Whole-history metadata sweep → stateless idle-game stats. Sums log-file
+/// sizes (lifetime bytes, drives level + XP) and collects active local-calendar
+/// days from mtimes (drives the streak). Reads no file *contents* — just the
+/// `stat` metadata `jsonlFiles` already prefetches — so it stays cheap and
+/// monotonic. Returns nil when the log tree doesn't exist yet.
+func computeGameStats(root: URL, now: Date) -> GameStats? {
+    guard FileManager.default.fileExists(atPath: root.path) else { return nil }
+    // ~100y window = "all history": effectively no mtime cutoff.
+    let files = jsonlFiles(under: root, modifiedWithinDays: 36_500)
+    guard !files.isEmpty else { return nil }
+    var bytes = 0
+    var days: Set<Int> = []
+    for f in files {
+        bytes += f.size
+        days.insert(GameStats.dayIndex(f.mtime))
+    }
+    return GameStats.make(lifetimeBytes: bytes, activeDays: days, today: GameStats.dayIndex(now))
+}
+
 // MARK: - Claude
 
 struct ClaudeReader: UsageReader {
@@ -146,7 +165,7 @@ struct ClaudeReader: UsageReader {
         let projectsRoot = URL(fileURLWithPath: config.expandedDir).appendingPathComponent("projects")
         var fileCache = ctx.fileCache
         defer { ctx.fileCache = fileCache }
-        return apiFirst(config: config, ctx: &ctx, now: now, fetch: {
+        var snap = apiFirst(config: config, ctx: &ctx, now: now, fetch: {
             let usage = try ClaudeUsageAPI.fetch(configDir: config.expandedDir)
             var weekly: [WeeklyMetric] = []
             if let week = usage.sevenDay {
@@ -178,6 +197,8 @@ struct ClaudeReader: UsageReader {
             }
             return estimate(config: config, app: app, cache: &fileCache, now: now, root: projectsRoot)
         })
+        snap.game = computeGameStats(root: projectsRoot, now: now)
+        return snap
     }
 
     private func estimate(
@@ -252,7 +273,7 @@ struct ClaudeReader: UsageReader {
 struct CodexReader: UsageReader {
     func read(config: ProviderConfig, app: AppConfig, ctx: inout ReaderContext, now: Date) -> ProviderSnapshot {
         let sessionsRoot = URL(fileURLWithPath: config.expandedDir).appendingPathComponent("sessions")
-        return apiFirst(config: config, ctx: &ctx, now: now, fetch: {
+        var snap = apiFirst(config: config, ctx: &ctx, now: now, fetch: {
             let usage = try CodexUsageAPI.fetch(configDir: config.expandedDir)
             var weekly: [WeeklyMetric] = []
             if let week = usage.secondary {
@@ -289,6 +310,8 @@ struct CodexReader: UsageReader {
             // fallback is genuine data (not an estimate) even when auth lapses.
             rolloutFallback(config: config, now: now, root: sessionsRoot)
         })
+        snap.game = computeGameStats(root: sessionsRoot, now: now)
+        return snap
     }
 
     /// Offline fallback: the newest rate_limits event a rollout file captured.
@@ -388,7 +411,7 @@ struct KimiReader: UsageReader {
         let sessionsRoot = URL(fileURLWithPath: config.expandedDir).appendingPathComponent("sessions")
         var fileCache = ctx.fileCache
         defer { ctx.fileCache = fileCache }
-        return apiFirst(config: config, ctx: &ctx, now: now, fetch: {
+        var snap = apiFirst(config: config, ctx: &ctx, now: now, fetch: {
             let usage = try KimiUsageAPI.fetch(configDir: config.expandedDir)
             // session ring = the shortest reported window (the ~5h rate limit)
             let session = usage.shortWindows.first?.window
@@ -420,6 +443,8 @@ struct KimiReader: UsageReader {
             }
             return estimate(config: config, app: app, cache: &fileCache, now: now, root: sessionsRoot)
         })
+        snap.game = computeGameStats(root: sessionsRoot, now: now)
+        return snap
     }
 
     private func estimate(

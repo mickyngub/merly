@@ -36,6 +36,27 @@ enum SpriteSheetStore {
         return loaded
     }
 
+    /// Whether a sheet PNG is bundled, without decoding it — a cheap URL probe
+    /// safe to call from any thread (used to pick an evolution form sheet and
+    /// degrade gracefully when its art isn't bundled yet).
+    static func exists(_ name: String) -> Bool {
+        Bundle.module.url(forResource: name, withExtension: "png", subdirectory: "Resources") != nil
+    }
+
+    /// Resolve the sprite sheet for an evolution `form` (0 = base), stepping down
+    /// to the highest available lower form and finally the base sheet. Returns
+    /// nil only when `base` is nil (the drawn-critter opt-out).
+    static func formSprite(base: String?, form: Int) -> String? {
+        guard let base else { return nil }
+        if form > 0 {
+            for f in stride(from: form, through: 1, by: -1) {
+                let name = "\(base)-evo\(f + 1)"   // evo2, evo3, …
+                if exists(name) { return name }
+            }
+        }
+        return base
+    }
+
     private static func load(name: String, cols: Int) -> SpriteSheet? {
         guard let url = Bundle.module.url(forResource: name, withExtension: "png",
                                           subdirectory: "Resources"),
