@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Whisper v3 Turbo vs Typhoon ASR Comparison</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <main class="max-w-6xl mx-auto p-6 md:p-8">
+    <header class="mb-8">
+      <p class="text-sm font-medium text-slate-500">Thai + English code-switching ASR test</p>
+      <h1 class="mt-2 text-3xl font-semibold tracking-normal">Whisper large-v3-turbo vs Typhoon Whisper large-v3</h1>
+      <p class="mt-3 max-w-3xl text-slate-600">
+        Same 51.168s Borumi mic sample, same faster-whisper CPU int8 runtime, same Thai language setting,
+        same glossary, same decoder knobs. This compares the actual output files from
+        <code class="px-1 py-0.5 rounded bg-slate-200 text-slate-800">~/typhoon-asr/compare_models.py</code>.
+      </p>
+    </header>
+
+    <section class="grid gap-4 md:grid-cols-3 mb-8">
+      <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <div class="text-sm font-semibold text-amber-900">Short verdict</div>
+        <p class="mt-2 text-sm leading-6 text-amber-950">
+          Typhoon is cleaner on the Windows/PowerShell part, but it is not strictly better across the full
+          sample yet because it dropped the first ~30 seconds as low-confidence junk.
+        </p>
+      </div>
+      <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+        <div class="text-sm font-semibold text-emerald-900">Where Typhoon wins</div>
+        <p class="mt-2 text-sm leading-6 text-emerald-950">
+          Fewer visible script errors, more coherent Thai in the kept segment, and better handling of the
+          “Search / Power Shell / Terminal” explanation.
+        </p>
+      </div>
+      <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
+        <div class="text-sm font-semibold text-sky-900">Where Turbo wins</div>
+        <p class="mt-2 text-sm leading-6 text-sky-950">
+          Coverage. Turbo produced text for nearly the whole 51s clip. Typhoon only kept the final ~20.6s
+          under the current settings.
+        </p>
+      </div>
+    </section>
+
+    <section class="mb-8 overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div class="border-b border-slate-200 px-4 py-3">
+        <h2 class="text-lg font-semibold">Measured Output</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[760px] text-left text-sm">
+          <thead class="bg-slate-100 text-slate-600">
+            <tr>
+              <th class="px-4 py-3 font-semibold">Metric</th>
+              <th class="px-4 py-3 font-semibold">Whisper large-v3-turbo</th>
+              <th class="px-4 py-3 font-semibold">Typhoon Whisper large-v3</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-200">
+            <tr>
+              <td class="px-4 py-3 font-medium">Kept audio coverage</td>
+              <td class="px-4 py-3">~50.8s of 51.2s</td>
+              <td class="px-4 py-3">~20.7s of 51.2s</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium">Kept segments</td>
+              <td class="px-4 py-3">15</td>
+              <td class="px-4 py-3">1 kept, 1 dropped</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium">Decode time</td>
+              <td class="px-4 py-3">21.5s</td>
+              <td class="px-4 py-3">32.0s</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium">Off-script characters</td>
+              <td class="px-4 py-3">8 visible non Thai/Latin characters: Cyrillic, Arabic, Devanagari</td>
+              <td class="px-4 py-3">0 in kept text</td>
+            </tr>
+            <tr>
+              <td class="px-4 py-3 font-medium">Important English terms</td>
+              <td class="px-4 py-3">Gets many terms, but also has errors like <code>PowerSheell</code> and <code>Window</code></td>
+              <td class="px-4 py-3">Keeps <code>Search</code>, <code>Power Shell</code>, <code>Terminal</code>; mishears <code>Enter</code> as <code>Inter</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="grid gap-5 lg:grid-cols-2 mb-8">
+      <article class="rounded-lg border border-slate-200 bg-white p-4">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <h2 class="text-lg font-semibold">Whisper large-v3-turbo</h2>
+          <span class="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-800">high coverage, dirty text</span>
+        </div>
+        <pre class="whitespace-pre-wrap rounded-md bg-slate-950 p-4 text-sm leading-6 text-slate-100">สำหรับตอนนี้ผมคิดว่าทุกท่านน่าจะพอเห็นภาพแล้วนะครับว่ะ Terminal เนี่ยไม่ได้แน่งโกอยอย่างที่เราคิد
+มันเป็นแค่อีกวิธีหนึ่ง อีقลูปแบบนึงในการผู้คือของคอมพิเตอร์ของเราท่อนนั้นเองนะครบ
+ผมคिดวาตอนนนี้ก็ถึงเวลาที่เราก็จะเปิดตัวโปรแกรม Terminalขึ้นมาใช้งานจริงๆกันแล้วกับ
+ท่านใดที่ใช้ตัว McAway เราก็จะไปที่มุมขอบนเพื่อเปิด Spotlight Search ขึ้นมาครับ
+จากนั้นเรากาจะ Search คำว่า Terminal
+แล้วก็จะ Enter เพื่อเติร์โปรแกรม Terminal ขืนมา
+ส่วนท่างใดนะครัพี่ใชยตัวกับ Window
+อาจจะต้องไปทีด้านล้างซ้ายเพื่อกดปุ่ม Start ขЫ้น
+จากนนั้นในช่อง Search เราจะพิมพ์คำ ว่าร์เชียร์
+PowerShell จะสะกดแบบนี้ครัب
+PowerShell ติดกันเลย
+แล้วเราก็จะกด Enter เพื่อเปิดโปรแกรม PowerShellขึ้นมา
+ซึ่ง PowerSheell กับ Terminal ก็จะเหมือนกับเลยนะครับ
+สามารถใช้งานเหมенกันนั้นได้เลยครัب
+จากนั้นเนี่ย เราก้าพร้อมแล้วก็ใช้เทอร์มินอลในสเต็บต่อไปครัวผม</pre>
+      </article>
+
+      <article class="rounded-lg border border-slate-200 bg-white p-4">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <h2 class="text-lg font-semibold">Typhoon Whisper large-v3</h2>
+          <span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-800">cleaner kept text, lower coverage</span>
+        </div>
+        <pre class="whitespace-pre-wrap rounded-md bg-slate-950 p-4 text-sm leading-6 text-slate-100">เพื่อกดปุ่มสตาร์ทขึ้นมาครับ จากนั้นในช่อง Search เนี่ยครัับเราจะพิมพ์คำว่า Power Shell นะครัB Power Shellจะสะกดแบบนี้ครั ล Power Shellติดกันเลย แล้วเราก็จะกด Inter เพื่อเปิดโปรแกรม Power Shellขึ นมา ซึ่ง Power Shell กับ Terminal เเลี่ยก็จะเหมือนกันนเลยนะคร็ับสามารถใช้งานเหมินกับได้เลยครั เพราะฉะนั้นนี้เรากก็พร้อมแล้วกับที่จะใช้เทอร์มินนัลในสเต็ปต่อไป</pre>
+        <div class="mt-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-950">
+          Dropped segment: <code>0.02s to 30.11s</code>, avg logprob <code>-0.94</code>, text was junk:
+          <span class="font-medium">นกังกฮาฟันกศังคังนกรังเ� หลักักฟินัง</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="mb-8 rounded-lg border border-slate-200 bg-white p-5">
+      <h2 class="text-lg font-semibold">The Difference You Can See</h2>
+      <div class="mt-4 grid gap-4 md:grid-cols-2">
+        <div>
+          <h3 class="text-sm font-semibold text-slate-700">Turbo around the PowerShell moment</h3>
+          <blockquote class="mt-2 rounded-md border-l-4 border-sky-300 bg-sky-50 p-3 text-sm leading-6 text-sky-950">
+            จากนนั้นในช่อง Search เราจะพิมพ์คำ ว่าร์เชียร์<br />
+            PowerShell จะสะกดแบบนี้ครัب<br />
+            ... ขЫ้น ... PowerSheell ... เหมенกันนั้นได้เลยครัب
+          </blockquote>
+          <p class="mt-2 text-sm text-slate-600">
+            It captures the broad topic, but the exact instruction is damaged. The target phrase after “Search”
+            becomes nonsense, and several foreign-script characters leak into Thai words.
+          </p>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold text-slate-700">Typhoon around the PowerShell moment</h3>
+          <blockquote class="mt-2 rounded-md border-l-4 border-emerald-300 bg-emerald-50 p-3 text-sm leading-6 text-emerald-950">
+            จากนั้นในช่อง Search เนี่ยครับเราจะพิมพ์คำว่า Power Shell<br />
+            ... Power Shell ติดกันเลย<br />
+            ... เปิดโปรแกรม Power Shell ขึ้นมา ซึ่ง Power Shell กับ Terminal ...
+          </blockquote>
+          <p class="mt-2 text-sm text-slate-600">
+            This is a usable rough transcript. It still needs proofing, but the teaching point is recoverable
+            without re-listening to every word.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="rounded-lg border border-slate-200 bg-white p-5">
+      <h2 class="text-lg font-semibold">Practical Takeaway</h2>
+      <p class="mt-3 text-sm leading-6 text-slate-700">
+        For this exact sample, Typhoon is not a blanket “better by X%” replacement yet. The honest read is:
+        <strong>Typhoon is better quality when it locks onto the Thai speech, but Whisper large-v3-turbo is better
+        at covering the whole clip under these settings.</strong>
+      </p>
+      <p class="mt-3 text-sm leading-6 text-slate-700">
+        If the goal is a creator workflow, the next best step is to test on a full clip and tune Typhoon’s
+        segmentation so it stops dropping the first half. If that still fails, use turbo for coverage and Typhoon
+        for higher-quality retries on the bad code-switching sections, or test full non-turbo large-v3 / Pathumma.
+      </p>
+      <div class="mt-4 grid gap-3 md:grid-cols-3">
+        <div class="rounded-md bg-slate-100 p-3 text-sm">
+          <div class="font-semibold">Raw log</div>
+          <code class="mt-1 block text-xs text-slate-700">~/typhoon-asr/compare.log</code>
+        </div>
+        <div class="rounded-md bg-slate-100 p-3 text-sm">
+          <div class="font-semibold">Turbo output</div>
+          <code class="mt-1 block text-xs text-slate-700">~/typhoon-asr/sample.wav.large-v3-turbo.txt</code>
+        </div>
+        <div class="rounded-md bg-slate-100 p-3 text-sm">
+          <div class="font-semibold">Typhoon output</div>
+          <code class="mt-1 block text-xs text-slate-700">~/typhoon-asr/sample.wav.typhoon-compare.txt</code>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
