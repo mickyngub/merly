@@ -81,10 +81,7 @@ struct ProviderCardView: View {
                 // moves to bottom-right so the two don't fight for one spot.
                 .overlay(alignment: .topTrailing) {
                     if let game = snapshot.game, !snapshot.isUnavailable, game.streakDays >= 2 {
-                        Text("🔥\(game.streakDays)")
-                            .font(.system(size: 9, weight: .heavy))
-                            .foregroundStyle(theme.text)
-                            .fixedSize()
+                        MascotStreakBadge(days: game.streakDays)
                             .offset(x: 7, y: -4)
                             .help("\(game.streakDays)-day streak — consecutive days used")
                     }
@@ -324,6 +321,44 @@ struct UsageBar: View {
                 .foregroundStyle(theme.text2)
                 .padding(.top, -1)
         }
+    }
+}
+
+/// Sprite-aligned streak marker. The flame is a generated pixel asset rather
+/// than the platform emoji so it stays on-theme with the mascots.
+struct MascotStreakBadge: View {
+    let days: Int
+
+    @Environment(\.theme) private var theme
+
+    /// Loaded from the `Resources` subdirectory — `.copy("Resources")` preserves
+    /// the folder in the bundle, so `Image(_:bundle:)` (which only searches the
+    /// bundle root / asset catalog) can't find it. Same path the sprites use.
+    private static let flame: NSImage? = {
+        guard let url = Bundle.module.url(forResource: "streak-fire",
+                                          withExtension: "png",
+                                          subdirectory: "Resources"),
+              let image = NSImage(contentsOf: url)
+        else { return nil }
+        return image
+    }()
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 1) {
+            if let flame = Self.flame {
+                Image(nsImage: flame)
+                    .interpolation(.none)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 11.5, height: 11.5)
+                    .accessibilityHidden(true)
+            }
+            Text("\(days)")
+                .font(.system(size: 9, weight: .heavy))
+                .foregroundStyle(theme.text)
+                .monospacedDigit()
+        }
+        .fixedSize()
     }
 }
 
