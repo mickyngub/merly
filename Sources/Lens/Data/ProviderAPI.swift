@@ -45,10 +45,24 @@ enum ProviderAPIError: Error, CustomStringConvertible {
         default: false
         }
     }
+
+    /// The server couldn't be reached or is erroring out — offline, DNS failure,
+    /// timeout, or a 5xx — as opposed to an auth lapse (where the server answered
+    /// and rejected our token). Estimate-only readers surface the same "No data"/
+    /// dead state for these once no fresh real reading remains, rather than a
+    /// fabricated "vs your busiest week" guess that reads as live usage.
+    var isServerUnreachable: Bool {
+        switch self {
+        case .network: true
+        case .http(let code): code >= 500
+        default: false
+        }
+    }
 }
 
 extension Error {
     var isAuthLapse: Bool { (self as? ProviderAPIError)?.isAuthLapse ?? false }
+    var isServerUnreachable: Bool { (self as? ProviderAPIError)?.isServerUnreachable ?? false }
 }
 
 // MARK: - small sync HTTP helper (always called off the main thread)

@@ -195,6 +195,11 @@ struct ClaudeReader: UsageReader {
             if error?.isAuthLapse == true {
                 return .unavailable(config, note: "Sign in again — run any \(config.name) command")
             }
+            // Server unreachable with no fresh cache left to ride on → same
+            // honest "No data"/offline mascot rather than a fabricated estimate.
+            if error?.isServerUnreachable == true {
+                return .unavailable(config, note: "Offline — can't reach \(config.name)")
+            }
             return estimate(config: config, app: app, cache: &fileCache, now: now, root: projectsRoot)
         })
         snap.game = computeGameStats(root: projectsRoot, now: now)
@@ -305,25 +310,31 @@ struct CodexReader: UsageReader {
                 isEstimated: false,
                 plan: usage.planLabel
             )
-        }, fallback: { _ in
+        }, fallback: { error in
             // Codex rollout files carry real rate_limits events, so the offline
-            // fallback is genuine data (not an estimate) even when auth lapses.
-            rolloutFallback(config: config, now: now, root: sessionsRoot)
+            // fallback is genuine data (not an estimate) even when auth lapses or
+            // the server is unreachable — keep showing it (aged) rather than dead.
+            if let real = rolloutFallback(config: config, now: now, root: sessionsRoot) {
+                return real
+            }
+            // Nothing on disk either: a server we couldn't reach is a true
+            // offline/no-data state; otherwise it's just an empty profile.
+            return error?.isServerUnreachable == true
+                ? .unavailable(config, note: "Offline — can't reach \(config.name)")
+                : .empty(config, note: "No rate-limit history in \(config.dir)")
         })
         snap.game = computeGameStats(root: sessionsRoot, now: now)
         return snap
     }
 
     /// Offline fallback: the newest rate_limits event a rollout file captured.
-    private func rolloutFallback(config: ProviderConfig, now: Date, root: URL) -> ProviderSnapshot {
-        guard FileManager.default.fileExists(atPath: root.path) else {
-            return .empty(config, note: "No sessions yet in \(config.dir)")
-        }
+    /// Returns nil when no rollout rate-limit data exists on disk at all, so the
+    /// caller can distinguish "real but stale numbers" from a true no-data state.
+    private func rolloutFallback(config: ProviderConfig, now: Date, root: URL) -> ProviderSnapshot? {
+        guard FileManager.default.fileExists(atPath: root.path) else { return nil }
         let files = jsonlFiles(under: root, modifiedWithinDays: 8)
             .sorted { $0.mtime > $1.mtime }
-        guard !files.isEmpty else {
-            return .empty(config, note: "No recent activity in \(config.dir)")
-        }
+        guard !files.isEmpty else { return nil }
 
         // Newest rate_limits event across the most recent rollouts wins.
         var best: (date: Date, limits: [String: Any])?
@@ -332,9 +343,7 @@ struct CodexReader: UsageReader {
             if best == nil || found.date > best!.date { best = found }
             if best != nil { break } // files are mtime-sorted; first hit is the newest
         }
-        guard let (eventDate, limits) = best else {
-            return .empty(config, note: "No rate-limit data in recent sessions")
-        }
+        guard let (eventDate, limits) = best else { return nil }
 
         func window(_ key: String) -> (pct: Double, resetsAt: Date?)? {
             guard let w = limits[key] as? [String: Any],
@@ -440,6 +449,9 @@ struct KimiReader: UsageReader {
         }, fallback: { error in
             if error?.isAuthLapse == true {
                 return .unavailable(config, note: "Sign in again — run any \(config.name) command")
+            }
+            if error?.isServerUnreachable == true {
+                return .unavailable(config, note: "Offline — can't reach \(config.name)")
             }
             return estimate(config: config, app: app, cache: &fileCache, now: now, root: sessionsRoot)
         })
