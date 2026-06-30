@@ -395,15 +395,24 @@ enum KimiUsageAPI {
             throw ProviderAPIError.expiredToken("no refresh token — run kimi to re-auth")
         }
 
-        let tok = try HTTP.request(
-            URL(string: "https://auth.kimi.com/api/oauth/token")!,
-            method: "POST",
-            formBody: [
-                "client_id": clientId,
-                "grant_type": "refresh_token",
-                "refresh_token": refreshToken,
-            ]
-        )
+        let tok: [String: Any]
+        do {
+            tok = try HTTP.request(
+                URL(string: "https://auth.kimi.com/api/oauth/token")!,
+                method: "POST",
+                formBody: [
+                    "client_id": clientId,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refreshToken,
+                ]
+            )
+        } catch let ProviderAPIError.http(code) where (400..<500).contains(code) {
+            // A 4xx on a refresh_token grant means the grant itself is dead
+            // (OAuth `invalid_grant` — the login lapsed, often because the CLI
+            // re-authed elsewhere and rotated the token). Surface it as an auth
+            // lapse so the card says "sign in again" instead of a cryptic 400.
+            throw ProviderAPIError.expiredToken("refresh rejected (\(code)) — run kimi to re-auth")
+        }
         guard let access = tok["access_token"] as? String else {
             throw ProviderAPIError.expiredToken("refresh rejected — run kimi to re-auth")
         }
