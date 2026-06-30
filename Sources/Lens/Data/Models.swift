@@ -305,6 +305,9 @@ struct ReaderContext {
     var fileCache: FileBucketCache
     var lastGood: [String: RealReading]
     var cooldownUntil: [String: Date]
+    /// Set on a user-initiated refresh so readers bypass the post-429 cooldown
+    /// and re-attempt the live fetch instead of silently returning cached numbers.
+    var force: Bool = false
 }
 
 enum LastGoodStore {

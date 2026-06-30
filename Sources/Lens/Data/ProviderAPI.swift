@@ -58,11 +58,20 @@ enum ProviderAPIError: Error, CustomStringConvertible {
         default: false
         }
     }
+
+    /// The endpoint answered with 429 — it's rate-limiting us (often because the
+    /// account is concurrently in use by the provider's own CLI). Drives the
+    /// "rate-limited" note so a stale card explains itself.
+    var isRateLimited: Bool {
+        if case .http(429) = self { return true }
+        return false
+    }
 }
 
 extension Error {
     var isAuthLapse: Bool { (self as? ProviderAPIError)?.isAuthLapse ?? false }
     var isServerUnreachable: Bool { (self as? ProviderAPIError)?.isServerUnreachable ?? false }
+    var isRateLimited: Bool { (self as? ProviderAPIError)?.isRateLimited ?? false }
 }
 
 // MARK: - small sync HTTP helper (always called off the main thread)

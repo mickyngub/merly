@@ -127,7 +127,9 @@ struct DockView: View {
             .help(showingSettings ? "Done" : "Settings")
             IconButton(systemName: "arrow.clockwise") {
                 withAnimation(.easeInOut(duration: 0.6)) { refreshSpin += 360 }
-                engine.refresh()
+                // A deliberate click forces past the 429 cooldown so it always
+                // re-attempts, rather than silently returning the stale cache.
+                engine.refresh(force: true)
             }
             .rotationEffect(.degrees(refreshSpin))
         }

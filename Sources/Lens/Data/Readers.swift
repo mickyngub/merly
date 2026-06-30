@@ -30,7 +30,10 @@ private func apiFirst(
     fetch: () throws -> ProviderSnapshot,
     fallback: (_ fetchError: Error?) -> ProviderSnapshot
 ) -> ProviderSnapshot {
-    let cooling = ctx.cooldownUntil[config.id].map { $0 > now } ?? false
+    // A user-initiated (forced) refresh ignores the post-429 cooldown so an
+    // explicit click always re-attempts the live fetch instead of silently
+    // returning stale cache. The cooldown still throttles the background poll.
+    let cooling = !ctx.force && (ctx.cooldownUntil[config.id].map { $0 > now } ?? false)
     var fetchError: Error?
 
     if !cooling {
@@ -52,7 +55,14 @@ private func apiFirst(
     // Prefer the last real numbers over a misleading estimate.
     if let cached = ctx.lastGood[config.id],
        now.timeIntervalSince(cached.capturedAt) < maxStaleAge {
-        return .fromCache(cached, config: config, now: now)
+        var snapshot = ProviderSnapshot.fromCache(cached, config: config, now: now)
+        // Explain *why* it's stuck on old numbers: an endpoint that's rate-limiting
+        // us (cooling down, or a forced retry that 429'd again) reads as
+        // "rate-limited" rather than an unexplained old timestamp.
+        if cooling || fetchError?.isRateLimited == true, let note = snapshot.note {
+            snapshot.note = "rate-limited · \(note)"
+        }
+        return snapshot
     }
 
     var snapshot = fallback(fetchError)

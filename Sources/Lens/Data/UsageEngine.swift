@@ -16,6 +16,9 @@ final class UsageEngine: ObservableObject {
     /// Set when refresh() is called mid-pass, so config edits (e.g. a provider
     /// just added) aren't lost to the in-flight pass's stale config.
     private var pendingRefresh = false
+    /// Whether the queued mid-pass refresh was user-initiated, so a forced click
+    /// during an in-flight pass isn't downgraded to a background poll.
+    private var pendingForce = false
     private let workQueue = DispatchQueue(label: "sh.micky.usagedock.engine", qos: .utility)
 
     init() {
@@ -31,9 +34,13 @@ final class UsageEngine: ObservableObject {
         }
     }
 
-    func refresh() {
+    /// `force` (a user-initiated refresh) makes readers bypass the per-provider
+    /// 429 cooldown and re-attempt the live fetch. The background timer never
+    /// forces, so an endpoint that's rate-limiting us still gets backed off.
+    func refresh(force: Bool = false) {
         guard !isRefreshing else {
             pendingRefresh = true
+            pendingForce = pendingForce || force
             return
         }
         isRefreshing = true
@@ -46,7 +53,8 @@ final class UsageEngine: ObservableObject {
             var ctx = ReaderContext(
                 fileCache: FileBucketCache.load(),
                 lastGood: LastGoodStore.load(),
-                cooldownUntil: cooldownsIn
+                cooldownUntil: cooldownsIn,
+                force: force
             )
             let now = Date()
             let results = config.providers.map { provider in
@@ -63,7 +71,9 @@ final class UsageEngine: ObservableObject {
                 self.isRefreshing = false
                 if self.pendingRefresh {
                     self.pendingRefresh = false
-                    self.refresh()
+                    let queuedForce = self.pendingForce
+                    self.pendingForce = false
+                    self.refresh(force: queuedForce)
                 }
             }
         }
