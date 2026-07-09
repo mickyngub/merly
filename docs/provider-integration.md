@@ -66,14 +66,21 @@ The returned blob is JSON. Tokens may be nested under `claudeAiOauth` or flat:
 {
   "five_hour":        { "utilization": 23.0, "resets_at": "2026-06-11T22:20:00.311155+00:00" },
   "seven_day":        { "utilization": 11.0, "resets_at": "2026-06-18T13:00:00+00:00" },
-  "seven_day_sonnet": { "utilization": 1.0,  "resets_at": "..." },
-  "seven_day_opus":   null,                  // null when the plan has no Opus sub-limit
-  "extra_usage":      { "is_enabled": false, "monthly_limit": null, ... }
+  "seven_day_sonnet": null,                  // legacy per-model keys — now GOING NULL (see limits[])
+  "seven_day_opus":   null,
+  "extra_usage":      { "is_enabled": false, "monthly_limit": null, ... },
+  "limits": [                                // newer unified array — the live source for per-model caps
+    { "kind": "session",       "group": "session", "percent": 7,  "resets_at": "..." },
+    { "kind": "weekly_all",    "group": "weekly",  "percent": 49, "resets_at": "..." },
+    { "kind": "weekly_scoped", "group": "weekly",  "percent": 83, "resets_at": "...",
+      "scope": { "model": { "id": null, "display_name": "Fable" } }, "is_active": true }
+  ]
 }
 ```
 
 - `utilization` is already a percentage (0–100). `resets_at` is ISO 8601 with **microsecond** precision + offset — trim to milliseconds before `ISO8601DateFormatter` (`parseAPIDate` does this).
-- Mapping: `five_hour` → session ring; `seven_day` → "All models" weekly bar; `seven_day_sonnet`/`_opus` → per-model weekly bars (shown only when present and non-zero).
+- Mapping: `five_hour` → session ring; `seven_day` → "All models" weekly bar.
+- **Per-model weekly caps migrated to `limits[]`.** As of July 2026 the top-level `seven_day_sonnet`/`_opus` keys return `null`; the model-scoped caps (Sonnet, Opus, and now **Fable**) arrive as `limits[]` entries with `kind: "weekly_scoped"` and `scope.model.display_name`. `ClaudeUsageAPI.fetch` prefers the array (each `weekly_scoped` → a "`<display_name>` only" weekly bar via `percent`/`resets_at`) and falls back to the legacy keys only when `limits[]` is absent. The array also carries `session`/`weekly_all` entries mirroring the top-level windows.
 - **Plan label:** combine `subscriptionType` + the `Nx` suffix of `rateLimitTier` → "Max (20x)", "Team (5x)". See `ClaudeUsageAPI.planLabel`.
 
 ---

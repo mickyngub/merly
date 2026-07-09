@@ -210,9 +210,26 @@ enum ClaudeUsageAPI {
         }
 
         var usage = Usage(fiveHour: window("five_hour"), sevenDay: window("seven_day"))
-        for (key, label) in [("seven_day_sonnet", "Sonnet only"), ("seven_day_opus", "Opus only")] {
-            if let w = window(key), w.usedPct > 0 || w.resetsAt != nil {
-                usage.sevenDayModels.append((label, w))
+
+        // Per-model weekly caps (Fable, and now Sonnet/Opus too) arrive in a
+        // unified `limits[]` array, each labeled by the model's display name; the
+        // old top-level `seven_day_<model>` keys are going null. Prefer the array;
+        // fall back to the legacy keys for CLIs still on the old response shape.
+        let scoped = (obj["limits"] as? [[String: Any]] ?? [])
+            .filter { ($0["kind"] as? String) == "weekly_scoped" }
+        if !scoped.isEmpty {
+            for item in scoped {
+                guard let pct = flexDouble(item["percent"]),
+                      let name = ((item["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
+                else { continue }
+                let w = UsageWindow(usedPct: pct, resetsAt: parseAPIDate(item["resets_at"]))
+                usage.sevenDayModels.append(("\(name) only", w))
+            }
+        } else {
+            for (key, label) in [("seven_day_sonnet", "Sonnet only"), ("seven_day_opus", "Opus only")] {
+                if let w = window(key), w.usedPct > 0 || w.resetsAt != nil {
+                    usage.sevenDayModels.append((label, w))
+                }
             }
         }
         usage.planLabel = planLabel(
