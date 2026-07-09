@@ -46,6 +46,16 @@ enum ProviderAPIError: Error, CustomStringConvertible {
         }
     }
 
+    /// The credentials exist but the access token went stale. For providers we
+    /// never refresh ourselves (Claude, Codex), the CLI still holds a live
+    /// refresh token, so recovery is just *activity* — running any command
+    /// silently refreshes it — not a full re-login. Distinguished from
+    /// `noCredentials`, where the login is truly gone and a sign-in is required.
+    var isExpiredLogin: Bool {
+        if case .expiredToken = self { return true }
+        return false
+    }
+
     /// The server couldn't be reached or is erroring out — offline, DNS failure,
     /// timeout, or a 5xx — as opposed to an auth lapse (where the server answered
     /// and rejected our token). Estimate-only readers surface the same "No data"/
@@ -70,6 +80,7 @@ enum ProviderAPIError: Error, CustomStringConvertible {
 
 extension Error {
     var isAuthLapse: Bool { (self as? ProviderAPIError)?.isAuthLapse ?? false }
+    var isExpiredLogin: Bool { (self as? ProviderAPIError)?.isExpiredLogin ?? false }
     var isServerUnreachable: Bool { (self as? ProviderAPIError)?.isServerUnreachable ?? false }
     var isRateLimited: Bool { (self as? ProviderAPIError)?.isRateLimited ?? false }
 }

@@ -202,8 +202,14 @@ struct ClaudeReader: UsageReader {
         }, fallback: { error in
             // Login lapsed → genuinely no data. Don't fall back to the
             // "vs your busiest week" estimate, which reads as real 100% usage.
+            // An *expired* token still has a live refresh token behind it (we
+            // never refresh Claude ourselves), so just using Claude again brings
+            // it back — don't tell the user to sign in. Missing creds do need it.
             if error?.isAuthLapse == true {
-                return .unavailable(config, note: "Sign in again — run any \(config.name) command")
+                let note = error?.isExpiredLogin == true
+                    ? "Run any \(config.name) command to refresh"
+                    : "Sign in again — run any \(config.name) command"
+                return .unavailable(config, note: note)
             }
             // Server unreachable with no fresh cache left to ride on → same
             // honest "No data"/offline mascot rather than a fabricated estimate.
