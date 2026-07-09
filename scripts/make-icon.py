@@ -2,15 +2,17 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow"]
 # ///
-"""Build Lens.icns from the happy Clawd sprite frame.
+"""Build Lens.icns from the Perch wizard mascot sprite.
 
-Composites the top-left (mood row 0, idle frame 0) cell of clawd-sprite.png —
-the canonical smiling Clawd — centered on a dark charcoal squircle that matches
-the Usage Dock panel, then emits a full .iconset and runs iconutil.
+`perch-mascot.png` is the crisp, pre-pixelated wizard-Clawd sprite (our canonical
+Clawd frame with a wizard hat, big handlebar mustache, and a gold-orb staff),
+stored transparent. We drop it, scaled to fill, on a full-bleed dark charcoal
+squircle that matches the Usage Dock panel, then emit the full .iconset and run
+iconutil.
 
-Rendered fresh at every icon size (nearest-neighbour on the pixel-art critter)
-so the pixels stay crisp from 16px to 1024px instead of blurring under a single
-downscale.
+To restyle the mascot: replace perch-mascot.png (a transparent pixel sprite) and
+re-run. The raw source art + de-smudge pipeline live in sprite-work/perch/
+(gitignored dev scratch); this script only needs the baked sprite.
 """
 from __future__ import annotations
 import pathlib
@@ -18,93 +20,47 @@ import subprocess
 from PIL import Image, ImageDraw
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SPRITE = ROOT / "Sources/Lens/Resources/clawd-sprite.png"
+SPRITE = ROOT / "scripts/perch-mascot.png"
 ICONSET = ROOT / "scripts/Lens.iconset"
 ICNS = ROOT / "scripts/Lens.icns"
 
-FRAME = 128          # clawd-sprite.png is a 4-col x 8-row grid of 128px cells
-BG_TOP = (44, 44, 52)      # charcoal gradient — lighter top
-BG_BOTTOM = (22, 22, 28)   # ...darker bottom, for a bit of depth
-MARGIN = 0.085       # transparent border around the squircle (Apple icon grid)
-RADIUS = 0.2237      # squircle corner radius as a fraction of the content box
-CRITTER_FILL = 0.60  # critter's longest side as a fraction of the canvas
+SIZE = 1024
+NAVY = (31, 35, 41, 255)     # Usage Dock panel charcoal
+RADIUS = 0.2237              # squircle corner radius (macOS icon grid)
+FILL = 0.82                  # sprite's longest side as a fraction of the canvas
+
+ICON_SIZES = [
+    (16, "icon_16x16.png"), (32, "icon_16x16@2x.png"),
+    (32, "icon_32x32.png"), (64, "icon_32x32@2x.png"),
+    (128, "icon_128x128.png"), (256, "icon_128x128@2x.png"),
+    (256, "icon_256x256.png"), (512, "icon_256x256@2x.png"),
+    (512, "icon_512x512.png"), (1024, "icon_512x512@2x.png"),
+]
 
 
-def clawd_frame() -> Image.Image:
-    """Row 0, col 0 of the sheet, cropped tight to the critter's pixels."""
-    sheet = Image.open(SPRITE).convert("RGBA")
-    cell = sheet.crop((0, 0, FRAME, FRAME))
-    bbox = cell.getbbox()  # trim transparent margins so scaling is by real pixels
-    return cell.crop(bbox) if bbox else cell
-
-
-def gradient_bg(size: int) -> Image.Image:
-    """Vertical charcoal gradient the size of the canvas."""
-    grad = Image.new("RGBA", (size, size))
-    px = grad.load()
-    for y in range(size):
-        t = y / max(size - 1, 1)
-        r = round(BG_TOP[0] + (BG_BOTTOM[0] - BG_TOP[0]) * t)
-        g = round(BG_TOP[1] + (BG_BOTTOM[1] - BG_TOP[1]) * t)
-        b = round(BG_TOP[2] + (BG_BOTTOM[2] - BG_TOP[2]) * t)
-        for x in range(size):
-            px[x, y] = (r, g, b, 255)
-    return grad
-
-
-def compose(size: int, critter: Image.Image) -> Image.Image:
-    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-
-    inset = round(size * MARGIN)
-    box = size - 2 * inset
-    radius = round(box * RADIUS)
-
-    # Rounded-rect (squircle-ish) mask for the charcoal background.
-    mask = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(mask).rounded_rectangle(
-        (inset, inset, size - inset - 1, size - inset - 1), radius=radius, fill=255
+def master() -> Image.Image:
+    sprite = Image.open(SPRITE).convert("RGBA")
+    sprite = sprite.crop(sprite.getbbox())
+    scale = (FILL * SIZE) / max(sprite.size)
+    sprite = sprite.resize(
+        (round(sprite.width * scale), round(sprite.height * scale)), Image.NEAREST
     )
-    canvas.paste(gradient_bg(size), (0, 0), mask)
-
-    # Scale the critter by its longest side, keeping pixels sharp.
-    target = size * CRITTER_FILL
-    scale = target / max(critter.width, critter.height)
-    cw, ch = round(critter.width * scale), round(critter.height * scale)
-    scaled = critter.resize((cw, ch), Image.NEAREST)
-
-    # Centered, nudged up ~2% so the legs don't crowd the bottom edge.
-    x = (size - cw) // 2
-    y = (size - ch) // 2 - round(size * 0.02)
-    canvas.paste(scaled, (x, y), scaled)
+    canvas = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+    ImageDraw.Draw(canvas).rounded_rectangle(
+        [0, 0, SIZE - 1, SIZE - 1], radius=round(RADIUS * SIZE), fill=NAVY
+    )
+    canvas.alpha_composite(
+        sprite, ((SIZE - sprite.width) // 2, (SIZE - sprite.height) // 2)
+    )
     return canvas
 
 
 def main() -> None:
-    critter = clawd_frame()
+    icon = master()
     ICONSET.mkdir(parents=True, exist_ok=True)
-
-    # (pixel size, iconset filename) — the standard 10 macOS slots.
-    slots = [
-        (16, "icon_16x16.png"),
-        (32, "icon_16x16@2x.png"),
-        (32, "icon_32x32.png"),
-        (64, "icon_32x32@2x.png"),
-        (128, "icon_128x128.png"),
-        (256, "icon_128x128@2x.png"),
-        (256, "icon_256x256.png"),
-        (512, "icon_256x256@2x.png"),
-        (512, "icon_512x512.png"),
-        (1024, "icon_512x512@2x.png"),
-    ]
-    rendered: dict[int, Image.Image] = {}
-    for px, name in slots:
-        if px not in rendered:
-            rendered[px] = compose(px, critter)
-        rendered[px].save(ICONSET / name)
-
-    subprocess.run(
-        ["iconutil", "-c", "icns", str(ICONSET), "-o", str(ICNS)], check=True
-    )
+    for size, name in ICON_SIZES:
+        icon.resize((size, size), Image.LANCZOS).save(ICONSET / name)
+    subprocess.run(["iconutil", "-c", "icns", str(ICONSET), "-o", str(ICNS)], check=True)
     print(f"Wrote {ICNS.relative_to(ROOT)} ({ICNS.stat().st_size} bytes)")
 
 
