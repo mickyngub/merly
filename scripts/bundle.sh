@@ -10,8 +10,12 @@ APP="build/Lens.app"
 BIN=".build/release/Lens"
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Lens"
+
+# App icon (Clawd mascot). Regenerate from the sprite sheet if it's missing.
+[ -f "scripts/Lens.icns" ] || uv run scripts/make-icon.py
+cp "scripts/Lens.icns" "$APP/Contents/Resources/Lens.icns"
 
 # Bundled resources (sprite sheets). Bundle.module resolves this next to the binary.
 cp -R ".build/release/Lens_Lens.bundle" "$APP/Contents/MacOS/" 2>/dev/null \
@@ -27,6 +31,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key>
     <string>sh.micky.lens</string>
     <key>CFBundleName</key>
+    <string>Lens</string>
+    <key>CFBundleIconFile</key>
     <string>Lens</string>
     <key>CFBundleDisplayName</key>
     <string>Lens</string>
