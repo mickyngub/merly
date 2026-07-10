@@ -1,7 +1,7 @@
 // SpriteSheet.swift — loads a bundled 4×4 mood/animation sprite sheet and
 // crops individual frames. Rows are moods (happy/neutral/tired/stressed),
 // columns are idle-cycle frames. Sheets are processed transparent PNGs in
-// Sources/Lens/Resources (see scripts that build them from the design grids).
+// Sources/Merlyn/Resources (see scripts that build them from the design grids).
 
 import CoreGraphics
 import ImageIO

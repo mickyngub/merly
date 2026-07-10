@@ -1,5 +1,5 @@
-// main.swift — Usage Dock entry point. Menu-bar-only app (no Dock icon);
-// `usagedock --print` runs the readers once and prints a plain-text snapshot,
+// main.swift — Merlyn entry point. Menu-bar-only app (no Dock icon);
+// `merlyn --print` runs the readers once and prints a plain-text snapshot,
 // which is handy for verifying data parsing without launching the UI.
 
 import AppKit
@@ -46,7 +46,7 @@ func printSnapshots() {
         cooldownUntil: [:]
     )
     let now = Date()
-    print("Usage Dock — \(app.providers.count) providers\n")
+    print("Merlyn — \(app.providers.count) providers\n")
     for provider in app.providers {
         let snap = reader(for: provider.kind).read(config: provider, app: app, ctx: &ctx, now: now)
         let reset = snap.sessionResetAt.map {

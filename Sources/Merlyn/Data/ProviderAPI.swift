@@ -285,7 +285,7 @@ enum CodexUsageAPI {
             headers: [
                 "Authorization": "Bearer \(token)",
                 "chatgpt-account-id": accountId,
-                "User-Agent": "Lens",
+                "User-Agent": "Merlyn",
             ]
         )
 

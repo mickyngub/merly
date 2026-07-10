@@ -1,6 +1,6 @@
 # Provider usage APIs — findings & integration notes
 
-How Usage Dock gets real, provider-reported rate limits for each agent CLI. Everything here was reverse-engineered on 2026-06-12 from the CLIs installed on this machine (Claude Code 2.1.170, Codex 0.139.0, Kimi Code via `~/.kimi-code/bin/kimi`); expect drift over time. Implementation lives in `Sources/UsageDock/Data/ProviderAPI.swift`, fallbacks in `Readers.swift`.
+How Merlyn gets real, provider-reported rate limits for each agent CLI. Everything here was reverse-engineered on 2026-06-12 from the CLIs installed on this machine (Claude Code 2.1.170, Codex 0.139.0, Kimi Code via `~/.kimi-code/bin/kimi`); expect drift over time. Implementation lives in `Sources/Merlyn/Data/ProviderAPI.swift`, fallbacks in `Readers.swift`.
 
 ## TL;DR table
 

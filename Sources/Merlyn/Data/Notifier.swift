@@ -48,7 +48,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private func requestAuthorization() {
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { _, error in
-                if let error { NSLog("Lens notifications: \(error.localizedDescription)") }
+                if let error { NSLog("Merlyn notifications: \(error.localizedDescription)") }
             }
     }
 
@@ -133,7 +133,7 @@ enum LoginItem {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            NSLog("Lens login item: \(error.localizedDescription)")
+            NSLog("Merlyn login item: \(error.localizedDescription)")
         }
     }
 }

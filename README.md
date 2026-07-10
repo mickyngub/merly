@@ -1,4 +1,4 @@
-# Usage Dock
+# Merlyn
 
 A native macOS menu bar app that tracks how much of your AI coding agent quota you've burned — across **Claude** (multiple accounts), **Codex**, **Kimi**, and any future provider you point at a config folder.
 
@@ -14,16 +14,16 @@ Each provider gets a cute 8-bit pixel critter whose **mood tracks your usage**: 
 ## Build & run
 
 ```sh
-scripts/bundle.sh          # → build/Usage Dock.app
-open "build/Usage Dock.app"
+scripts/bundle.sh          # → build/Merlyn.app
+open "build/Merlyn.app"
 ```
 
 Dev loop:
 
 ```sh
 swift build
-.build/debug/UsageDock --print     # headless data check
-.build/debug/UsageDock --open      # run with panel open
+.build/debug/Merlyn --print     # headless data check
+.build/debug/Merlyn --open      # run with panel open
 ```
 
 Requires macOS 14+ and a Swift 5.9+ toolchain. No dependencies.
@@ -38,13 +38,13 @@ All providers show **real, provider-reported rate limits** — the same numbers 
 | Codex | `~/.codex/auth.json` ChatGPT OAuth token | `chatgpt.com/backend-api/wham/usage` → 5h + weekly windows, per-model extras, plan type |
 | Kimi | `~/.kimi-code/credentials/kimi-code.json` (15-min tokens; refreshed with the CLI's own lockfile protocol, rotated creds persisted back) | `api.kimi.com/coding/v1/usages` → weekly + rate-limit windows |
 
-First launch asks for Keychain access to the Claude credentials — click **Always Allow**. Usage Dock never sends tokens anywhere except the provider's own API.
+First launch asks for Keychain access to the Claude credentials — click **Always Allow**. Merlyn never sends tokens anywhere except the provider's own API.
 
 **Fallback:** if an API is unreachable or a login is stale, the card falls back to local analysis (Codex: last `rate_limits` event in rollout files; Claude/Kimi: token counts from transcripts relative to your busiest period) and marks the ring with `≈`. Pin `sessionTokenLimit` / `weeklyTokenLimit` in the config to make fallback bars absolute.
 
 ## Adding a provider
 
-Click **Add a provider** in the panel (or edit `~/Library/Application Support/UsageDock/providers.json`):
+Click **Add a provider** in the panel (or edit `~/Library/Application Support/Merlyn/providers.json`):
 
 ```json
 {
@@ -66,6 +66,6 @@ The app picks up config changes on the next refresh (≤60s, or hit the refresh 
 
 ## Notes
 
-- First launch scans recent history once (~20s in the background); afterwards refreshes are incremental and take milliseconds. The parse cache lives at `~/Library/Application Support/UsageDock/usage-cache.json` and is safe to delete.
+- First launch scans recent history once (~20s in the background); afterwards refreshes are incremental and take milliseconds. The parse cache lives at `~/Library/Application Support/Merlyn/usage-cache.json` and is safe to delete.
 - Right-click the menu bar item for Refresh / Edit Providers / Quit.
 - The design was prototyped in Claude Design; the bundle is archived in `docs/design/`.

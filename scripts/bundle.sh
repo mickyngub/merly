@@ -1,25 +1,25 @@
 #!/bin/bash
-# bundle.sh — build a release binary and assemble "Lens.app".
+# bundle.sh — build a release binary and assemble "Merlyn.app".
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 swift build -c release
 
-APP="build/Lens.app"
-BIN=".build/release/Lens"
+APP="build/Merlyn.app"
+BIN=".build/release/Merlyn"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$BIN" "$APP/Contents/MacOS/Lens"
+cp "$BIN" "$APP/Contents/MacOS/Merlyn"
 
 # App icon (Clawd mascot). Regenerate from the sprite sheet if it's missing.
-[ -f "scripts/Lens.icns" ] || uv run scripts/make-icon.py
-cp "scripts/Lens.icns" "$APP/Contents/Resources/Lens.icns"
+[ -f "scripts/Merlyn.icns" ] || uv run scripts/make-icon.py
+cp "scripts/Merlyn.icns" "$APP/Contents/Resources/Merlyn.icns"
 
 # Bundled resources (sprite sheets). Bundle.module resolves this next to the binary.
-cp -R ".build/release/Lens_Lens.bundle" "$APP/Contents/MacOS/" 2>/dev/null \
-  || echo "warning: Lens_Lens.bundle not found (no resources?)"
+cp -R ".build/release/Merlyn_Merlyn.bundle" "$APP/Contents/MacOS/" 2>/dev/null \
+  || echo "warning: Merlyn_Merlyn.bundle not found (no resources?)"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -27,15 +27,15 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>Lens</string>
+    <string>Merlyn</string>
     <key>CFBundleIdentifier</key>
-    <string>sh.micky.lens</string>
+    <string>sh.micky.merlyn</string>
     <key>CFBundleName</key>
-    <string>Lens</string>
+    <string>Merlyn</string>
     <key>CFBundleIconFile</key>
-    <string>Lens</string>
+    <string>Merlyn</string>
     <key>CFBundleDisplayName</key>
-    <string>Lens</string>
+    <string>Merlyn</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

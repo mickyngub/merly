@@ -76,7 +76,7 @@ struct SettingsView: View {
             section("General") {
                 toggleRow(
                     "Launch at login",
-                    caption: "Open Lens automatically when you sign in",
+                    caption: "Open Merlyn automatically when you sign in",
                     isOn: $launchAtLogin
                 )
                 if !LoginItem.isSupported {

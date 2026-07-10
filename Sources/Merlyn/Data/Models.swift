@@ -85,10 +85,10 @@ enum Fate {
     /// The most-separated rotation increment — successive slots are maximally apart.
     static let goldenAngle = 137.50776405003785
 
-    /// 1-in-N one-shot shiny odds. `LENS_SHINY_RARITY` overrides it for tuning or
+    /// 1-in-N one-shot shiny odds. `MERLYN_SHINY_RARITY` overrides it for tuning or
     /// testing (set it to 1 to make every mascot shiny).
     static var rarity: UInt64 {
-        if let raw = ProcessInfo.processInfo.environment["LENS_SHINY_RARITY"],
+        if let raw = ProcessInfo.processInfo.environment["MERLYN_SHINY_RARITY"],
            let n = UInt64(raw), n >= 1 { return n }
         return 128
     }
@@ -361,7 +361,7 @@ struct AppConfig: Codable {
         set { defaultMascot = newValue }
     }
 
-    /// Every coding CLI Lens can set up out of the box, paired with the on-disk
+    /// Every coding CLI Merlyn can set up out of the box, paired with the on-disk
     /// markers that prove the CLI is actually configured. Markers are specific
     /// files (not just the dir), so a dir that merely holds a symlinked
     /// `skills/` folder isn't mistaken for a real install. Drives both the
@@ -413,7 +413,7 @@ struct AppConfig: Codable {
 enum AppPaths {
     static var supportDir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Lens", isDirectory: true)
+        return base.appendingPathComponent("Merlyn", isDirectory: true)
     }
     static var configFile: URL { supportDir.appendingPathComponent("providers.json") }
     static var cacheFile: URL { supportDir.appendingPathComponent("usage-cache.json") }

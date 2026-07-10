@@ -1,6 +1,6 @@
 # Provider integration reference
 
-How Usage Dock obtains **real, provider-reported** rate limits — the same numbers as Claude's `/usage` screen, Codex Analytics, and the Kimi Console. This is the load-bearing knowledge for adding providers or debugging auth; the parsing lives in `Sources/UsageDock/Data/ProviderAPI.swift`, the orchestration in `Readers.swift`.
+How Merlyn obtains **real, provider-reported** rate limits — the same numbers as Claude's `/usage` screen, Codex Analytics, and the Kimi Console. This is the load-bearing knowledge for adding providers or debugging auth; the parsing lives in `Sources/Merlyn/Data/ProviderAPI.swift`, the orchestration in `Readers.swift`.
 
 Everything here was reverse-engineered from the installed CLIs (June 2026 versions). Endpoints and payload shapes can drift — when something breaks, re-derive from the binaries (see [Re-deriving from the CLIs](#re-deriving-from-the-clis)).
 
@@ -23,7 +23,7 @@ ProviderCard
 
 **Estimates never alarm.** When `isEstimated`, the mascot mood uses the *session* figure only (not the self-referential weekly ratio), weekly bars render in the provider accent instead of escalating amber/red, and the ring shows `≈`. Estimated percentages are relative to the user's own busiest period, not a real quota — never present them as official.
 
-**Persistence.** Last-good readings live in `~/Library/Application Support/UsageDock/last-good.json` (`LastGoodStore`); the file-parse cache for estimation lives in `usage-cache.json`. Both are safe to delete.
+**Persistence.** Last-good readings live in `~/Library/Application Support/Merlyn/last-good.json` (`LastGoodStore`); the file-parse cache for estimation lives in `usage-cache.json`. Both are safe to delete.
 
 Refresh runs every 60s off the main thread (`UsageEngine.workQueue`), threading a `ReaderContext` (file cache + last-good + cooldowns) through all readers in one pass. All HTTP is synchronous via the `HTTP` helper in `ProviderAPI.swift` (a semaphore-blocked `URLSession` task) — fine because it's never on the main thread.
 
@@ -102,7 +102,7 @@ The returned blob is JSON. Tokens may be nested under `claudeAiOauth` or flat:
 
 **Endpoint:** `GET https://chatgpt.com/backend-api/wham/usage`
 (The binary also references `/backend-api/api/codex/usage`; `/wham/usage` is the one that returns the full structure.)
-**Headers:** `Authorization: Bearer <access_token>`, `chatgpt-account-id: <account_id>`, `User-Agent: UsageDock`
+**Headers:** `Authorization: Bearer <access_token>`, `chatgpt-account-id: <account_id>`, `User-Agent: Merlyn`
 
 ```jsonc
 {
@@ -190,7 +190,7 @@ Overridable like the CLI: `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST` (default `h
 
 ## Adding a provider
 
-If it's Claude-Code / Codex / Kimi-compatible, just add an entry to `~/Library/Application Support/UsageDock/providers.json` (`kind`, `dir`, `style`, `palette`) — no code. For a genuinely new backend:
+If it's Claude-Code / Codex / Kimi-compatible, just add an entry to `~/Library/Application Support/Merlyn/providers.json` (`kind`, `dir`, `style`, `palette`) — no code. For a genuinely new backend:
 
 1. Add a case to `ProviderKind` (`Models.swift`).
 2. Add a `<Name>UsageAPI` enum to `ProviderAPI.swift` returning windows + plan label.

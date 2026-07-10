@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Lens",
+    name: "Merlyn",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "Lens",
-            path: "Sources/Lens",
+            name: "Merlyn",
+            path: "Sources/Merlyn",
             resources: [.copy("Resources")]
         )
     ]

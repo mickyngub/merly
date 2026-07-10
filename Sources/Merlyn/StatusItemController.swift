@@ -67,7 +67,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let pct = Int(peak.pressurePct.rounded())
             button.toolTip = "\(peak.config.name) \(peak.config.account) — \(pct)% of closest limit used"
         } else {
-            button.toolTip = "Usage Dock"
+            button.toolTip = "Merlyn"
         }
         renderFrame()
     }
@@ -137,7 +137,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(mascot)
 
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Usage Dock", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Merlyn", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quit.target = NSApp
         menu.addItem(quit)
 
