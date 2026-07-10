@@ -85,6 +85,13 @@ extension SpriteSheetStore {
     /// panel (SwiftUI) and menu bar (AppKit) renderers use.
     static func recoloredFrame(name: String, row: Int, col: Int, accentHex: UInt32) -> CGImage? {
         guard let frame = sheet(named: name)?.frame(row: row, col: col) else { return nil }
+        // Full-colour designed sheets (the Merlyn wizard: purple hat, gold, orange)
+        // keep their own palette — duotone-tinting toward a provider accent would
+        // wreck it — so they skip the recolour.
+        if fullColorSheets.contains(name) { return frame }
         return SpriteRecolor.tint(frame, cacheKey: "\(name)|\(row)|\(col)", accentHex: accentHex)
     }
+
+    /// Sheets rendered as-is (their own palette), never accent-tinted.
+    private static let fullColorSheets: Set<String> = ["merlyn-sprite"]
 }

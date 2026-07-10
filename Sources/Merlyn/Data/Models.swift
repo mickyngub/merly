@@ -51,7 +51,7 @@ struct DefaultMascot: Codable, Equatable {
     /// Bundled sprite-sheet basename; "" renders the drawn critter instead.
     var sprite: String
 
-    static let standard = DefaultMascot(style: .cat, sprite: "clawd-sprite")
+    static let standard = DefaultMascot(style: .cat, sprite: "merlyn-sprite")
 
     /// Sprite sheet to render, or nil when drawing the critter.
     var resolvedSprite: String? { sprite.isEmpty ? nil : sprite }

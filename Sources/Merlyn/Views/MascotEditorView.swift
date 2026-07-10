@@ -41,9 +41,10 @@ private struct DefaultMascotRow: View {
 
     private var mascot: DefaultMascot { engine.appConfig.defaultMascotConfig }
 
-    /// Drawn opt-out (`""`) plus every provider's sprites.
+    /// Drawn opt-out (`""`), the Merlyn wizard (the app's own mascot), then every
+    /// provider's sprites.
     private var sheets: [(id: String, label: String)] {
-        [("", "Drawn")] + ProviderKind.allCases.flatMap(\.spriteFamily)
+        [("", "Drawn"), ("merlyn-sprite", "Merlyn")] + ProviderKind.allCases.flatMap(\.spriteFamily)
     }
 
     var body: some View {
