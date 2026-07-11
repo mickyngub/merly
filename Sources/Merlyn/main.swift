@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panelController = PanelController(engine: engine)
         statusItemController = StatusItemController(engine: engine, panel: panelController)
         notificationManager = NotificationManager(engine: engine)
+        enableLoginItemOnFirstLaunch()
         if CommandLine.arguments.contains("--light") {
             NSApp.appearance = NSAppearance(named: .aqua)
         }
@@ -35,6 +36,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.panelController.collapseToRail()
             }
         }
+    }
+
+    /// The first launch of the bundled app registers the login item so Merlyn
+    /// opens at sign-in without the user hunting for the toggle. Guarded by a
+    /// one-shot flag: if the user later turns it off in Settings, we never
+    /// re-force it. No-ops for the unbundled dev binary (`isSupported == false`),
+    /// so the flag is only ever set once the real .app has run.
+    private func enableLoginItemOnFirstLaunch() {
+        guard LoginItem.isSupported else { return }
+        let key = "didAutoEnableLoginItem"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        LoginItem.set(true)
+        UserDefaults.standard.set(true, forKey: key)
     }
 }
 
