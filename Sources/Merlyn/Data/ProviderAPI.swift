@@ -250,6 +250,19 @@ enum ClaudeUsageAPI {
         return usage
     }
 
+    /// Plan label straight from the keychain, no usage call — so the card keeps
+    /// its "Max (20x)" / "Free" pill even when the usage endpoint 429s or is down.
+    static func planLabel(configDir: String) -> String? {
+        guard let data = readKeychain(service: keychainService(forConfigDir: configDir)),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        let oauth = (root["claudeAiOauth"] as? [String: Any]) ?? root
+        return planLabel(
+            subscription: oauth["subscriptionType"] as? String,
+            tier: oauth["rateLimitTier"] as? String
+        )
+    }
+
     /// "max" + "default_claude_max_20x" → "Max (20x)"
     static func planLabel(subscription: String?, tier: String?) -> String? {
         guard let subscription else { return nil }

@@ -216,6 +216,18 @@ struct ClaudeReader: UsageReader {
             if error?.isServerUnreachable == true {
                 return .unavailable(config, note: "Offline — can't reach \(config.name)")
             }
+            // A *standing* 429 (org disabled Claude Code subscription access, a
+            // free tier with no real windows, or a persistently blocked account)
+            // means there's no real quota to read. Any transient 429 already rode
+            // out on the cached real reading in apiFirst before we got here, so
+            // reaching this point = no quota exists. Show honest "No data", not a
+            // "vs your busiest week" estimate that reads as real quota. Keep the
+            // plan pill — it comes from the keychain, which a 429 doesn't touch.
+            if error?.isRateLimited == true {
+                var snap = ProviderSnapshot.unavailable(config, note: "Rate-limited — quota unavailable")
+                snap.plan = ClaudeUsageAPI.planLabel(configDir: config.expandedDir)
+                return snap
+            }
             return estimate(config: config, app: app, cache: &fileCache, now: now, root: projectsRoot)
         })
         snap.game = computeGameStats(root: projectsRoot, now: now)
