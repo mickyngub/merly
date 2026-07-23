@@ -1,6 +1,6 @@
 # merlyn — Usage Dock
 
-Native macOS menu bar app (Swift/AppKit + SwiftUI) showing AI agent quota usage for Claude (×2 accounts), Codex, and Kimi, with pixel-art mascots whose mood tracks usage. Every provider must expose a real usage API — local-log-only estimation is not a basis for a supported provider. Design source: Claude Design bundle "Usage Dock" (see `docs/design/`).
+Native macOS menu bar app (Swift/AppKit + SwiftUI) showing AI agent quota usage for Claude (×2 accounts), Codex, and Kimi, with pixel-art mascots whose mood tracks usage. Every provider must expose a real usage API — local-log-only estimation is not a basis for a supported provider. The UI was originally prototyped as "Usage Dock" in Claude Design.
 
 ## Commands
 

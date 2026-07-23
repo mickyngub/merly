@@ -40,7 +40,7 @@ Works for any Claude-Code-compatible CLI keyed by its config dir, so the two acc
 | `$HOME/.claude` (the default) | `Claude Code-credentials` |
 | anything else | `Claude Code-credentials-<hex>` where `<hex>` = first 8 chars of `sha256(absoluteConfigDir)` |
 
-Verified: `/Users/micky/.claude-work` → `ed92d010` → `Claude Code-credentials-ed92d010`. Implemented in `ClaudeUsageAPI.keychainService(forConfigDir:)`.
+Verified on the author's machine: the absolute path of `~/.claude-work` hashed to `ed92d010`, giving `Claude Code-credentials-ed92d010`. The hex is machine-specific — it hashes the *absolute* config-dir path, so it differs per home directory. Implemented in `ClaudeUsageAPI.keychainService(forConfigDir:)`.
 
 **Read it via `/usr/bin/security`, not `SecItemCopyMatching`.** The keychain ACL prompt attaches to the *requesting binary's code signature*. Our app is ad-hoc signed, so every rebuild is a new identity and re-prompts forever. Shelling out to the stable, already-authorized `/usr/bin/security find-generic-password -s <service> -w` sidesteps that — one "Always Allow" (usually already granted by Claude Code itself) sticks across rebuilds. See `ClaudeUsageAPI.readKeychain`.
 
@@ -203,7 +203,7 @@ When an endpoint changes, the CLIs are the source of truth. Locations as of June
 
 - **Kimi:** `~/.kimi-code/bin/kimi` — a ~126 MB bundled-JS binary. The original TS is embedded as `//#region ../../packages/oauth/src/<file>.ts` blocks. Grep with Python:
   ```python
-  data = open('/Users/micky/.kimi-code/bin/kimi','rb').read()
+  import os; data = open(os.path.expanduser('~/.kimi-code/bin/kimi'), 'rb').read()
   i = data.find(b'packages/oauth/src/managed-usage.ts'); print(data[i:i+3800].decode('utf-8','replace'))
   ```
   Key files: `managed-usage.ts` (endpoint + parser), `constants.ts` (`clientId`, `oauthHost`), and the `refreshAccessToken` fn (`/api/oauth/token`, flock).

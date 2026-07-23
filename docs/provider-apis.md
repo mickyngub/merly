@@ -23,4 +23,4 @@ How Merlyn gets real, provider-reported rate limits for each agent CLI. Everythi
   "Claude Code-credentials-" + hex(sha256(absoluteConfigDirPath))[0..8]
   ```
 
-  Verified: `sha256("/Users/micky/.claude-work")[:8] = ed92d010` matches the real keychain item.
+  Verified on the author's machine: `sha256(<absolute path of ~/.claude-work>)[:8] = ed92d010`, matching the real keychain item. The hex is machine-specific — it hashes the absolute config-dir path.
