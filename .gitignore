@@ -1,6 +1,13 @@
 .build/
 build/
+dist/
 .DS_Store
 *.xcuserstate
 sprite-work/
 scripts/Merlyn.iconset/
+.claude/
+.uv-cache/
+# notarization credentials — never commit
+.notary-credentials
+*.p12
+*.p8
