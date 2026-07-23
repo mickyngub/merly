@@ -1,8 +1,25 @@
 #!/bin/bash
 # bundle.sh — build a release binary and assemble "Merlyn.app".
+#
+# Signing is automatic and optional:
+#   • If a "Developer ID Application" certificate is in your keychain, the app
+#     is signed with it + Hardened Runtime (--options runtime), ready to be
+#     notarized by scripts/dmg.sh.
+#   • Otherwise it is ad-hoc signed — runs locally, but Gatekeeper will warn
+#     when the app is downloaded or sent to someone else.
+#
+# Overrides (env):
+#   MERLYN_VERSION=1.2   marketing version (CFBundleShortVersionString)
+#   MERLYN_BUILD=7       build number      (CFBundleVersion)
+#   SIGN_IDENTITY="..."  force a specific codesign identity
+#   MERLYN_ADHOC=1       force ad-hoc signing even if a Developer ID exists
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+VERSION="${MERLYN_VERSION:-1.0}"
+BUILD="${MERLYN_BUILD:-1}"
+COPYRIGHT="© 2026 Pichaya Puttekulangkura. MIT Licensed."
 
 swift build -c release
 
@@ -18,10 +35,36 @@ cp "$BIN" "$APP/Contents/MacOS/Merlyn"
 cp "scripts/Merlyn.icns" "$APP/Contents/Resources/Merlyn.icns"
 
 # Bundled resources (sprite sheets). Bundle.module resolves this next to the binary.
+NESTED="$APP/Contents/MacOS/Merlyn_Merlyn.bundle"
 cp -R ".build/release/Merlyn_Merlyn.bundle" "$APP/Contents/MacOS/" 2>/dev/null \
   || echo "warning: Merlyn_Merlyn.bundle not found (no resources?)"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+# SwiftPM emits a FLAT resource bundle (Resources/ + no Info.plist), which
+# codesign refuses to seal ("bundle format unrecognized"). Repack it into a
+# standard Contents/ bundle layout so it can be signed and notarized. Bundle.module
+# still resolves resources from Contents/Resources at runtime.
+if [ -d "$NESTED" ] && [ ! -f "$NESTED/Contents/Info.plist" ]; then
+  mkdir -p "$NESTED/Contents/Resources"
+  [ -d "$NESTED/Resources" ] && mv "$NESTED"/Resources/* "$NESTED/Contents/Resources/" 2>/dev/null || true
+  rmdir "$NESTED/Resources" 2>/dev/null || true
+  cat > "$NESTED/Contents/Info.plist" <<'BPLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleIdentifier</key><string>sh.micky.merlyn.resources</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>Merlyn_Merlyn</string>
+    <key>CFBundlePackageType</key><string>BNDL</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+</dict>
+</plist>
+BPLIST
+fi
+
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -39,20 +82,51 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>${VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>${BUILD}</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>${COPYRIGHT}</string>
 </dict>
 </plist>
 PLIST
 
-codesign --force --sign - "$APP" 2>/dev/null || true
+# ── Signing ────────────────────────────────────────────────────────────────
+ENTITLEMENTS="scripts/Merlyn.entitlements"
+IDENTITY="${SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ] && [ "${MERLYN_ADHOC:-0}" != "1" ]; then
+  IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n1 || true)"
+fi
 
-echo "Built: $APP"
+if [ -n "$IDENTITY" ]; then
+  echo "▶ Signing with Developer ID + Hardened Runtime:"
+  echo "    $IDENTITY"
+  # Sign the nested bundle inside-out first, then the app itself.
+  if [ -e "$NESTED" ]; then
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$NESTED"
+  fi
+  codesign --force --options runtime --timestamp \
+    --entitlements "$ENTITLEMENTS" \
+    --sign "$IDENTITY" "$APP"
+  echo "✔ Signed. Next: scripts/dmg.sh notarizes + packages (see docs/specs/distribution.md)."
+else
+  echo "▶ No Developer ID identity found — ad-hoc signing (local use only)."
+  echo "  Copies you download or send will hit Gatekeeper until notarized;"
+  echo "  see docs/specs/distribution.md to enroll and notarize."
+  if [ -e "$NESTED" ]; then
+    codesign --force --sign - "$NESTED"
+  fi
+  codesign --force --sign - "$APP"
+fi
+
+codesign --verify --strict "$APP"
+
+echo "Built: $APP  (v${VERSION} build ${BUILD})"
 echo "Run:   open \"$APP\""

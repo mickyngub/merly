@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Merlyn runs OUTSIDE the App Sandbox by design: its whole job is reading
+      other tools' credentials from the login Keychain and their config files
+      under $HOME (~/.codex, ~/.claude*, ~/.kimi-code), which the sandbox
+      forbids. That is also why Merlyn cannot ship on the Mac App Store as-is.
+
+      Hardened Runtime IS enabled at signing time (codesign --options runtime)
+      so the app can be notarized. No entitlement exceptions are required:
+      Keychain items are read by shelling out to /usr/bin/security (not the
+      in-process Keychain APIs), file reads are ordinary user-owned dotfiles,
+      and network access is the default outbound-client behavior. This dict is
+      intentionally empty.
+    -->
+</dict>
+</plist>
