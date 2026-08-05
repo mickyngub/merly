@@ -64,9 +64,10 @@ enum ProviderKind: String, Codable, CaseIterable {
     }
 }
 
-/// The app's own mascot, shown in the menu bar ("topnav"). Independent of any
-/// provider; its look is user-editable while its mood tracks the busiest
-/// provider's pressure.
+/// The app's own mascot, shown beside the panel's "Merlyn" title. Independent of
+/// any provider; its look is user-editable while its mood tracks the busiest
+/// provider's pressure. (The menu bar always wears the *reported provider's*
+/// critter instead — see `docs/decisions/menu-bar`.)
 struct DefaultMascot: Codable, Equatable {
     var style: MascotStyle
     /// User-chosen index into the fated deck (see `Fate`). The deck's *hues* are
@@ -250,6 +251,72 @@ enum LimitWindow {
     static func isWeekly(seconds: Double?) -> Bool { (seconds ?? 0) >= 48 * 3600 }
 }
 
+/// Why a provider has no usable numbers.
+///
+/// One flag ("unavailable") blurred four different problems into one grey dash,
+/// and only one of them is fixable by signing in. Worse, an unclassified failure
+/// used to fall through to the local estimate, so an account the server had
+/// *refused* rendered as a confident "100% used · vs your busiest week" — a
+/// fabricated number wearing a real limit's clothes. A refusal is a reading in
+/// its own right, so it gets the gauge's slot and says what it is.
+enum ProviderFailure: String, Equatable {
+    /// No credentials, or the server rejected the token. The only state where
+    /// signing in again is the fix — so the only one that offers the button.
+    case signedOut
+    /// The server answered and said no (403 lapsed/org-disabled subscription, 402
+    /// unpaid, 404 no such resource). There is no quota to read on this account.
+    case refused
+    /// A standing 429: the endpoint won't report quota right now.
+    case rateLimited
+    /// Unreachable, timed out, or 5xx.
+    case offline
+
+    /// Word under the badge. 9.5pt inside a 50pt slot — keep it to one short word.
+    var badgeWord: String {
+        switch self {
+        case .signedOut: "sign in"
+        case .refused: "error"
+        case .rateLimited: "limited"
+        case .offline: "offline"
+        }
+    }
+
+    /// Headline for the card's clock line, which has room for two or three words.
+    var headline: String {
+        switch self {
+        case .signedOut: "Signed out"
+        case .refused: "No usage access"
+        case .rateLimited: "Rate-limited"
+        case .offline: "Offline"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .signedOut: "person.badge.key"
+        case .refused: "exclamationmark.triangle.fill"
+        case .rateLimited: "hourglass"
+        case .offline: "bolt.slash.fill"
+        }
+    }
+
+    /// Something is wrong with the account, not merely with this minute's fetch —
+    /// the one distinction worth spending red on.
+    var isFault: Bool { self == .refused }
+}
+
+/// One-shot grants that clear a rate-limit window early (Codex's
+/// `rate_limit_reset_credits`). `applicable` is the subset the provider says can
+/// be spent on the window you're actually blocked on right now — you can hold a
+/// credit that today's limit has no use for, so the two counts differ and the tag
+/// must not promise the bigger one is usable.
+struct ResetCredits: Equatable, Codable {
+    var available: Int
+    var applicable: Int
+
+    var isUsableNow: Bool { applicable > 0 }
+}
+
 struct WeeklyMetric: Identifiable, Equatable, Codable {
     var label: String
     var pct: Double
@@ -285,22 +352,20 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// True when these are the last *real* API numbers, served because the live
     /// fetch failed transiently (e.g. HTTP 429). Real, just not fresh.
     var isStale: Bool = false
-    /// True when the provider's login lapsed (token expired / signed out) and we
-    /// have no fresh real reading to fall back on — so there is genuinely *no
-    /// data*. The card shows a "No data" state and the mascot goes `.dead`
-    /// instead of inventing a "vs your busiest week" estimate that reads as real.
-    var isUnavailable: Bool = false
-    /// True when the reader failed specifically because this provider's login
-    /// lapsed — as opposed to the server being unreachable or rate-limiting us,
-    /// where signing in again would change nothing. Only this state offers the
-    /// card's sign-in button.
-    var needsSignIn: Bool = false
+    /// Set when there is genuinely no reading to show — the login lapsed, the
+    /// server refused us, or it can't be reached — and no fresh real numbers to
+    /// fall back on. The card renders the failure in the gauge's slot and the
+    /// mascot goes `.dead`, instead of inventing a "vs your busiest week"
+    /// estimate that reads as a real limit.
+    var failure: ProviderFailure? = nil
     /// Optional note (e.g. why data is missing, or how fresh a cached reading is).
     var note: String?
     /// The provider's subscription tier (e.g. "Max (20x)", "Pro", "Team (5x)"),
     /// shown as a pill beside the provider name. Nil when the provider exposes no
     /// plan info (token-estimated providers) or its login has lapsed.
     var plan: String? = nil
+    /// Spare window resets this account holds, when the provider grants them.
+    var resetCredits: ResetCredits? = nil
     /// Derived idle-game stats (level, XP, streak, evolution form) computed from
     /// the provider's lifetime log metadata. Stored, not computed: it needs file
     /// I/O, so the reader fills it on the work queue (never lazily on the main
@@ -308,6 +373,12 @@ struct ProviderSnapshot: Identifiable, Equatable {
     var game: GameStats? = nil
 
     var id: String { config.id }
+
+    /// No usable reading, whatever the cause.
+    var isUnavailable: Bool { failure != nil }
+    /// Signing in again is the fix — as opposed to an unreachable or refusing
+    /// server, where it would change nothing. Only this state offers the button.
+    var needsSignIn: Bool { failure == .signedOut }
 
     /// Sprite sheet for the mascot's current evolution form, degrading to the
     /// highest *available* lower form (and finally the base sheet) so the app
@@ -356,6 +427,55 @@ struct ProviderSnapshot: Identifiable, Equatable {
         return binding
     }
 
+    /// Every window worth plotting, outermost ring lane first: the longest out on
+    /// the rim, the shortest innermost. Estimated providers contribute only their
+    /// primary window — their weekly figures are "vs your busiest week" ratios that
+    /// trend to 100% by construction.
+    ///
+    /// Which lane the primary window takes follows its *span*, not its being
+    /// primary. Codex's primary limit is a 7-day budget, so pinning it inside put
+    /// the cap that gates every request on the innermost lane while a 0% per-model
+    /// weekly owned the rim. A genuine rolling session still keeps the innermost
+    /// lane unconditionally, so "right now" is always in the same place and can
+    /// never be the lane truncation drops.
+    ///
+    /// Lives here rather than in the card because it's a reading of the provider,
+    /// not a layout choice — and `--print` verifies the order without a screenshot.
+    func ringWindows(maxLanes: Int) -> [(label: String, pct: Double)] {
+        // A failure has no quantity behind it: the card swaps the whole ring for the
+        // error badge, and a 0% lane would read as "nothing used yet".
+        guard failure == nil else { return [] }
+        let primary = (label: primaryWindowName, pct: sessionPct)
+        // Partitioned rather than sorted: Swift's sort isn't stable, and two weekly
+        // caps tie, so sorting could swap lanes between renders.
+        let reported = isEstimated ? [] : weekly
+        let nested = (reported.filter(\.isWeekly) + reported.filter { !$0.isWeekly })
+            .map { (label: $0.label, pct: $0.pct) }
+            // A nested window can carry the primary's name (Codex reports a 7-day
+            // primary *and* a 7-day secondary, both "Weekly"). Lane ids must stay
+            // unique, and the primary is the one that owns the name.
+            .filter { $0.label != primary.label }
+
+        guard hasSessionWindow else { return [primary] + nested.prefix(maxLanes - 1) }
+        return Array(nested.prefix(maxLanes - 1)) + [primary]
+    }
+
+    /// The one limit worth reporting outside the panel: which window is closest to
+    /// blocking the next request, and how full it is. The menu bar needs both
+    /// halves — "90%" is useless without knowing whether it's the 5h window or the
+    /// week — and `estimated` so a guess can't be shown as a reported figure.
+    var bindingGauge: (window: String, pct: Double, estimated: Bool)? {
+        guard failure == nil else { return nil }
+        if let binding = bindingLimit {
+            return (binding.isWeekly ? "wk" : "5h", binding.pct, false)
+        }
+        // The primary window's own span, never assumed: Codex's is 7 days. "wk"
+        // rather than "7d" because a weekly window's exact length isn't always
+        // reported (Kimi states none for its rolling budget).
+        let window = hasSessionWindow ? primaryWindowName : "wk"
+        return (window, sessionPct, isEstimated)
+    }
+
     var mood: Mood {
         if isUnavailable { return .dead }
         if !isActive && !isEstimated && pressurePct < 5 { return .sleeping }
@@ -370,17 +490,16 @@ struct ProviderSnapshot: Identifiable, Equatable {
         )
     }
 
-    /// No usable data: the login lapsed and there's no fresh real reading to
-    /// show. Renders as a "No data" card with the `.dead` mascot. Pass
-    /// `needsSignIn` when the cause was the login itself, so the card can offer
-    /// to run the CLI's sign-in.
-    static func unavailable(
-        _ config: ProviderConfig, note: String? = nil, needsSignIn: Bool = false
+    /// No usable reading, and `failure` says why. Renders as an error card with
+    /// the `.dead` mascot — the sign-in button only for `.signedOut`, where it's
+    /// actually the fix.
+    static func failed(
+        _ config: ProviderConfig, _ failure: ProviderFailure, note: String? = nil
     ) -> ProviderSnapshot {
         ProviderSnapshot(
             config: config, sessionPct: 0, sessionResetAt: nil,
             weekly: [], isActive: false, isEstimated: false,
-            isUnavailable: true, needsSignIn: needsSignIn, note: note
+            failure: failure, note: note
         )
     }
 
@@ -389,7 +508,8 @@ struct ProviderSnapshot: Identifiable, Equatable {
         guard !isEstimated, !isStale, !isUnavailable else { return nil }
         return RealReading(
             sessionPct: sessionPct, sessionResetAt: sessionResetAt,
-            weekly: weekly, planNote: plan, capturedAt: now
+            weekly: weekly, planNote: plan, capturedAt: now,
+            resetCredits: resetCredits
         )
     }
 
@@ -400,7 +520,8 @@ struct ProviderSnapshot: Identifiable, Equatable {
         return ProviderSnapshot(
             config: config, sessionPct: reading.sessionPct, sessionResetAt: reading.sessionResetAt,
             weekly: reading.weekly, isActive: false, isEstimated: false, isStale: true,
-            note: "as of \(ageText)", plan: reading.planNote
+            note: "as of \(ageText)", plan: reading.planNote,
+            resetCredits: reading.resetCredits
         )
     }
 }
@@ -413,6 +534,8 @@ struct RealReading: Codable {
     var weekly: [WeeklyMetric]
     var planNote: String?
     var capturedAt: Date
+    /// Optional so readings cached before reset credits existed still decode.
+    var resetCredits: ResetCredits? = nil
 }
 
 /// Mutable state threaded through a refresh pass: the file-parse cache, the
@@ -465,6 +588,11 @@ struct AppConfig: Codable {
     var notifications: NotificationSettings?
     /// Optional so older configs decode; falls back to `.standard` when absent.
     var defaultMascot: DefaultMascot?
+    /// Which provider the menu bar gauge reports on. nil (and an id that no longer
+    /// matches a provider) means whichever is closest to a limit — the app's
+    /// original always-busiest behaviour, kept as the default because it's the one
+    /// pick that can't go stale.
+    var menuBarProviderId: String? = nil
 
     /// Always-present view of the alert settings, defaulting when absent.
     var notificationSettings: NotificationSettings {

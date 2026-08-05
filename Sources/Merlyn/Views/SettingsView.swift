@@ -11,6 +11,9 @@ struct SettingsView: View {
 
     @State private var settings: NotificationSettings
     @State private var launchAtLogin: Bool
+    /// "" is the auto pick — Picker needs a non-optional tag, and nil in the
+    /// config is what "whichever is busiest" means.
+    @State private var menuBarProvider: String
     @Environment(\.theme) private var theme
 
     private let accent = Color(hex: 0x4C8DFF)
@@ -20,6 +23,7 @@ struct SettingsView: View {
         self.onDone = onDone
         _settings = State(initialValue: engine.appConfig.notificationSettings)
         _launchAtLogin = State(initialValue: LoginItem.isEnabled)
+        _menuBarProvider = State(initialValue: engine.appConfig.menuBarProviderId ?? "")
     }
 
     var body: some View {
@@ -33,6 +37,29 @@ struct SettingsView: View {
                     .foregroundStyle(theme.text)
                 Spacer(minLength: 0)
                 IconButton(systemName: "xmark", action: onDone)
+            }
+
+            section("Menu bar") {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 10) {
+                        Text("Show limits for")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(theme.text)
+                        Spacer(minLength: 8)
+                        Picker("", selection: $menuBarProvider) {
+                            Text("Busiest provider").tag("")
+                            ForEach(engine.appConfig.providers) { provider in
+                                Text("\(provider.name) · \(provider.account)").tag(provider.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .controlSize(.small)
+                        .frame(maxWidth: 165)
+                    }
+                    Text("The menu bar wears this provider's mascot, with a gauge under it for whichever limit — 5h or weekly — is closest to blocking it. Hover for the figure.")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(theme.text3)
+                }
             }
 
             section("Alerts") {
@@ -93,6 +120,9 @@ struct SettingsView: View {
                 .strokeBorder(theme.cardBorder, lineWidth: 1)
         )
         .onChange(of: settings) { _, new in engine.updateNotificationSettings(new) }
+        .onChange(of: menuBarProvider) { _, id in
+            engine.updateMenuBarProvider(id.isEmpty ? nil : id)
+        }
         .onChange(of: launchAtLogin) { _, on in
             LoginItem.set(on)
             launchAtLogin = LoginItem.isEnabled // reflect actual result

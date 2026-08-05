@@ -36,12 +36,14 @@ enum ProviderAPIError: Error, CustomStringConvertible {
         }
     }
 
-    /// The login is gone, not merely unreachable: the token expired or there are
-    /// no credentials. Readers whose only fallback is a misleading local estimate
-    /// surface "No data" for these instead of guessing.
+    /// The login is gone, not merely unreachable: the token expired, the server
+    /// rejected it (401), or there are no credentials at all. Readers whose only
+    /// fallback is a misleading local estimate surface "No data" for these
+    /// instead of guessing.
     var isAuthLapse: Bool {
         switch self {
         case .expiredToken, .noCredentials: true
+        case .http(401): true
         default: false
         }
     }
@@ -52,8 +54,20 @@ enum ProviderAPIError: Error, CustomStringConvertible {
     /// silently refreshes it — not a full re-login. Distinguished from
     /// `noCredentials`, where the login is truly gone and a sign-in is required.
     var isExpiredLogin: Bool {
-        if case .expiredToken = self { return true }
-        return false
+        switch self {
+        case .expiredToken: true
+        case .http(401): true
+        default: false
+        }
+    }
+
+    /// The server answered and refused: 403 when a subscription lapses or an org
+    /// disables usage access, 402 unpaid, 404 no such resource. Neither a retry
+    /// nor a fresh sign-in changes it, so there is genuinely no quota to read —
+    /// and no honest way to stand a local estimate in for one.
+    var isAccessDenied: Bool {
+        guard case .http(let code) = self else { return false }
+        return (400..<500).contains(code) && code != 401 && code != 429
     }
 
     /// The server couldn't be reached or is erroring out — offline, DNS failure,
@@ -81,6 +95,7 @@ enum ProviderAPIError: Error, CustomStringConvertible {
 extension Error {
     var isAuthLapse: Bool { (self as? ProviderAPIError)?.isAuthLapse ?? false }
     var isExpiredLogin: Bool { (self as? ProviderAPIError)?.isExpiredLogin ?? false }
+    var isAccessDenied: Bool { (self as? ProviderAPIError)?.isAccessDenied ?? false }
     var isServerUnreachable: Bool { (self as? ProviderAPIError)?.isServerUnreachable ?? false }
     var isRateLimited: Bool { (self as? ProviderAPIError)?.isRateLimited ?? false }
 }
@@ -291,6 +306,8 @@ enum CodexUsageAPI {
         var secondary: UsageWindow?
         var additional: [(name: String, fiveHour: UsageWindow?, weekly: UsageWindow?)] = []
         var planLabel: String?
+        /// Spare window resets on the account (`rate_limit_reset_credits`).
+        var resetCredits: ResetCredits?
     }
 
     static func fetch(configDir: String) throws -> Usage {
@@ -327,6 +344,15 @@ enum CodexUsageAPI {
             guard let name = extra["limit_name"] as? String,
                   let rl = extra["rate_limit"] as? [String: Any] else { continue }
             usage.additional.append((name, window(rl, "primary_window"), window(rl, "secondary_window")))
+        }
+        if let credits = obj["rate_limit_reset_credits"] as? [String: Any] {
+            let available = Int(flexDouble(credits["available_count"]) ?? 0)
+            // Absent on older responses; treat that as "unknown, don't promise it's
+            // spendable" rather than defaulting to the full available count.
+            let applicable = Int(flexDouble(credits["applicable_available_count"]) ?? 0)
+            if available > 0 {
+                usage.resetCredits = ResetCredits(available: available, applicable: applicable)
+            }
         }
         usage.planLabel = planLabel(obj["plan_type"] as? String)
         return usage

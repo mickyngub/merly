@@ -66,13 +66,27 @@ func printSnapshots() {
         let reset = snap.sessionResetAt.map {
             ProviderCardView.duration(until: $0, now: now)
         } ?? "—"
-        let kindNote = snap.isUnavailable ? "no data" : snap.isStale ? "reported (stale)" : snap.isEstimated ? "estimated" : "reported"
+        let kindNote = snap.failure.map { "no data — \($0.headline.lowercased())" }
+            ?? (snap.isStale ? "reported (stale)" : snap.isEstimated ? "estimated" : "reported")
         let shinyMark = provider.isShiny ? " ✨shiny" : ""
         let planMark = snap.plan.map { " — \($0)" } ?? ""
-        print("● \(provider.name) · \(provider.account)\(planMark)\(shinyMark)  (\(provider.dir))")
+        let creditMark = snap.resetCredits.map {
+            " — \($0.available) reset\($0.available == 1 ? "" : "s")"
+                + ($0.isUsableNow ? " (\($0.applicable) usable now)" : " (none applicable)")
+        } ?? ""
+        print("● \(provider.name) · \(provider.account)\(planMark)\(shinyMark)\(creditMark)  (\(provider.dir))")
         print("   session: \(Int(snap.sessionPct.rounded()))% used [\(snap.mood.tagWord)] · resets in \(reset) · \(kindNote)\(snap.isActive ? " · ACTIVE" : "")")
         for metric in snap.weekly {
             print("   \(metric.label): \(Int(metric.pct.rounded()))% used · \(metric.resetText)")
+        }
+        // Ring lanes outermost-first, and the one figure the menu bar reports —
+        // both derived, so printing them is how they're checked without a screenshot.
+        let lanes = snap.ringWindows(maxLanes: 3)
+            .map { "\($0.label) \(Int($0.pct.rounded()))%" }
+            .joined(separator: " → ")
+        if !lanes.isEmpty { print("   ring (rim → centre): \(lanes)") }
+        if let gauge = snap.bindingGauge {
+            print("   menu bar: \(gauge.estimated ? "≈" : "")\(gauge.window) \(Int(gauge.pct.rounded()))%")
         }
         if let g = snap.game {
             let mb = Double(g.lifetimeBytes) / 1_048_576

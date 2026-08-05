@@ -34,7 +34,10 @@ private func apiFirst(
     // explicit click always re-attempts the live fetch instead of silently
     // returning stale cache. The cooldown still throttles the background poll.
     let cooling = !ctx.force && (ctx.cooldownUntil[config.id].map { $0 > now } ?? false)
-    var fetchError: Error?
+    // A cooldown is itself the reason: the only thing that sets one is a 429. Left
+    // as a nil error, the fallback read it as "unexplained" and papered over a
+    // standing rate limit with a local estimate.
+    var fetchError: Error? = cooling ? ProviderAPIError.http(429) : nil
 
     if !cooling {
         do {
@@ -66,13 +69,42 @@ private func apiFirst(
     }
 
     var snapshot = fallback(fetchError)
-    // A "No data" fallback carries its own concise note; don't tack the raw
+    // A failure snapshot carries its own concise note; don't tack the raw
     // "login expired (…)" reason onto it.
     if !snapshot.isUnavailable {
-        let reason = fetchError.map { "\($0)" } ?? "API cooling down"
+        let reason = cooling ? "API cooling down" : fetchError.map { "\($0)" } ?? "API unavailable"
         snapshot.note = [snapshot.note, reason].compactMap(\.self).joined(separator: " · ")
     }
     return snapshot
+}
+
+/// Maps a fetch failure onto the card's error state, for readers whose only other
+/// option is a local estimate. Returns nil when the error doesn't rule the
+/// estimate out (schema drift, or no error at all) — an unreadable *response* from
+/// a healthy account is exactly what the offline safety net is for, while a
+/// refusal, a lapse or a dead endpoint means there is no quota to stand in for.
+private func failureSnapshot(_ error: Error?, config: ProviderConfig) -> ProviderSnapshot? {
+    guard let error else { return nil }
+    if error.isAuthLapse {
+        // An *expired* token still has a live refresh token behind it (we never
+        // refresh Claude/Codex ourselves), so using the CLI again brings it back.
+        // Missing credentials genuinely need the sign-in.
+        return .failed(config, .signedOut, note: error.isExpiredLogin
+            ? "Expired — sign in, or run any \(config.name) command"
+            : "Signed out — sign in to see usage again")
+    }
+    if error.isRateLimited {
+        return .failed(config, .rateLimited,
+                       note: "Rate-limited — \(config.name) won't report quota right now")
+    }
+    if error.isAccessDenied {
+        return .failed(config, .refused,
+                       note: "\(error) — this account has no usage access. Check its subscription.")
+    }
+    if error.isServerUnreachable {
+        return .failed(config, .offline, note: "Offline — can't reach \(config.name)")
+    }
+    return nil
 }
 
 // MARK: - File discovery helpers
@@ -203,33 +235,17 @@ struct ClaudeReader: UsageReader {
                 plan: usage.planLabel
             )
         }, fallback: { error in
-            // Login lapsed → genuinely no data. Don't fall back to the
-            // "vs your busiest week" estimate, which reads as real 100% usage.
-            // An *expired* token still has a live refresh token behind it (we
-            // never refresh Claude ourselves), so just using Claude again brings
-            // it back — don't tell the user to sign in. Missing creds do need it.
-            if error?.isAuthLapse == true {
-                let note = error?.isExpiredLogin == true
-                    ? "Expired — sign in, or run any \(config.name) command"
-                    : "Signed out — sign in to see usage again"
-                return .unavailable(config, note: note, needsSignIn: true)
-            }
-            // Server unreachable with no fresh cache left to ride on → same
-            // honest "No data"/offline mascot rather than a fabricated estimate.
-            if error?.isServerUnreachable == true {
-                return .unavailable(config, note: "Offline — can't reach \(config.name)")
-            }
-            // A *standing* 429 (org disabled Claude Code subscription access, a
-            // free tier with no real windows, or a persistently blocked account)
-            // means there's no real quota to read. Any transient 429 already rode
-            // out on the cached real reading in apiFirst before we got here, so
-            // reaching this point = no quota exists. Show honest "No data", not a
-            // "vs your busiest week" estimate that reads as real quota. Keep the
-            // plan pill — it comes from the keychain, which a 429 doesn't touch.
-            if error?.isRateLimited == true {
-                var snap = ProviderSnapshot.unavailable(config, note: "Rate-limited — quota unavailable")
-                snap.plan = ClaudeUsageAPI.planLabel(configDir: config.expandedDir)
-                return snap
+            // Claude has no real offline source — only the "vs your busiest week"
+            // token estimate, which trends to 100% by construction. So any failure
+            // that means "there is no quota to read here" (lapsed login, refused
+            // account, standing 429, dead endpoint) shows as an error instead: a
+            // fabricated 100% reads exactly like a maxed real limit. Transient 429s
+            // already rode out on the cached real reading up in apiFirst.
+            if var failed = failureSnapshot(error, config: config) {
+                // The plan pill comes from the keychain, which no API failure
+                // touches — keep it so the card still says which plan is broken.
+                failed.plan = ClaudeUsageAPI.planLabel(configDir: config.expandedDir)
+                return failed
             }
             return estimate(config: config, app: app, cache: &fileCache, now: now, root: projectsRoot)
         })
@@ -352,7 +368,8 @@ struct CodexReader: UsageReader {
                 isActive: recentActivity(under: sessionsRoot, now: now),
                 isEstimated: false,
                 sessionWindowSeconds: usage.primary?.windowSeconds,
-                plan: usage.planLabel
+                plan: usage.planLabel,
+                resetCredits: usage.resetCredits
             )
         }, fallback: { error in
             // Codex rollout files carry real rate_limits events, so the offline
@@ -361,16 +378,10 @@ struct CodexReader: UsageReader {
             if let real = rolloutFallback(config: config, now: now, root: sessionsRoot) {
                 return real
             }
-            // Nothing on disk either. A lapsed login is the one cause the user can
-            // act on, so say so and offer the sign-in; an unreachable server is a
-            // true offline state; anything else is just an empty profile.
-            if error?.isAuthLapse == true {
-                return .unavailable(config, note: "Signed out — sign in to see usage again",
-                                    needsSignIn: true)
-            }
-            return error?.isServerUnreachable == true
-                ? .unavailable(config, note: "Offline — can't reach \(config.name)")
-                : .empty(config, note: "No rate-limit history in \(config.dir)")
+            // Nothing on disk either, so the failure is all there is to report.
+            // Anything we can't classify is just an empty profile.
+            return failureSnapshot(error, config: config)
+                ?? .empty(config, note: "No rate-limit history in \(config.dir)")
         })
         snap.game = computeGameStats(root: sessionsRoot, now: now)
         return snap
@@ -499,13 +510,10 @@ struct KimiReader: UsageReader {
                 plan: usage.planLabel
             )
         }, fallback: { error in
-            if error?.isAuthLapse == true {
-                return .unavailable(config, note: "Signed out — sign in to see usage again",
-                                    needsSignIn: true)
-            }
-            if error?.isServerUnreachable == true {
-                return .unavailable(config, note: "Offline — can't reach \(config.name)")
-            }
+            // Same rule as Claude: the local estimate is only an offline safety net,
+            // never a stand-in for an account whose quota we've been told we can't
+            // read (see `failureSnapshot`).
+            if let failed = failureSnapshot(error, config: config) { return failed }
             return estimate(config: config, app: app, cache: &fileCache, now: now, root: sessionsRoot)
         })
         snap.game = computeGameStats(root: sessionsRoot, now: now)

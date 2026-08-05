@@ -95,10 +95,46 @@ struct DockView: View {
         }
     }
 
+    /// The app's own mascot beside the title — its home, now that the menu bar
+    /// wears the reported provider's critter instead. Its mood tracks the busiest
+    /// provider's pressure, but never `.dead`: this one is Merlyn itself, and one
+    /// lapsed provider mustn't make the app look broken. Tapping it opens the
+    /// editor, which is otherwise only reachable from the right-click menu.
+    private var titleMascot: some View {
+        let mascot = engine.appConfig.defaultMascotConfig
+        let peak = engine.snapshots.max { $0.pressurePct < $1.pressurePct }
+        return MascotView(
+            style: mascot.style,
+            palette: mascot.resolvedPalette,
+            mood: peak.map { $0.isUnavailable ? .happy : $0.mood } ?? .happy,
+            px: 26,
+            spriteName: mascot.resolvedSprite
+        )
+        .frame(width: 26, height: 26)
+        .overlay(alignment: .topLeading) {
+            if mascot.isShiny {
+                ShinySparkle().help("Shiny! A rare mascot color.")
+            }
+        }
+        .onTapGesture {
+            withAnimation(Theme.snappy(0.4)) {
+                showingMascot = true
+                showingSettings = false
+                editing = false
+                addingProvider = false
+                editingProviderId = nil
+            }
+        }
+        .help("Merlyn — click to edit the mascot")
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
+            if !showingMascot {
+                titleMascot
+            }
             VStack(alignment: .leading, spacing: 1) {
-                Text("Usage")
+                Text("Merlyn")
                     .font(.system(size: 17, weight: .bold))
                     .tracking(-0.3)
                     .foregroundStyle(theme.text)

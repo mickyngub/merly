@@ -167,9 +167,27 @@ final class UsageEngine: ObservableObject {
         snapshots = config.providers.compactMap { byId[$0.id] }
     }
 
-    /// Busiest provider — drives the menu bar extra, like the prototype's peak pick.
-    var peak: ProviderSnapshot? {
-        snapshots.max { $0.sessionPct < $1.sessionPct }
+    /// The provider the menu bar reports on: the pinned one while it still exists,
+    /// otherwise whichever is closest to a limit. Falling back rather than showing
+    /// nothing matters — a pinned id survives in providers.json after the provider
+    /// is deleted, and an empty menu bar would look like the app had died.
+    var menuBarSnapshot: ProviderSnapshot? {
+        if let id = appConfig.menuBarProviderId,
+           let pinned = snapshots.first(where: { $0.id == id }) {
+            return pinned
+        }
+        return snapshots.max { $0.pressurePct < $1.pressurePct }
+    }
+
+    /// Pin (or unpin, with nil) the provider the menu bar gauge reports. Re-emits
+    /// `snapshots` so the status item — which observes that publisher — re-renders
+    /// immediately instead of at the next refresh tick.
+    func updateMenuBarProvider(_ id: String?) {
+        var config = appConfig
+        config.menuBarProviderId = id
+        ConfigStore.save(config)
+        appConfig = config
+        snapshots = snapshots
     }
 
     var updatedText: String {

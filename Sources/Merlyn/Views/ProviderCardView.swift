@@ -19,23 +19,13 @@ struct ProviderCardView: View {
 
     private var accent: Color { snapshot.config.resolvedPalette.accent }
 
-    /// Ring lanes, outermost first: the longest window out on the rim, down to the
-    /// 5h session innermost. Estimated providers contribute only the session — their
-    /// weekly figures are "vs your busiest week" ratios that trend to 100%.
-    ///
-    /// The session holds the innermost lane unconditionally, so "right now" is
-    /// always in the same place and can never be the lane truncation drops.
+    /// Ring lanes, outermost first — the order comes from the snapshot (see
+    /// `ringWindows`); the card only supplies the colours, since only it knows the
+    /// provider's palette.
     private var ringLimits: [RingLimit] {
         let baseHue = Fate.hue(slot: snapshot.config.resolvedColorSlot,
                                shiny: snapshot.config.isShiny)
-        // Partitioned rather than sorted: Swift's sort isn't stable, and two weekly
-        // caps tie, so sorting could swap lanes between renders.
-        let longer = snapshot.isEstimated
-            ? []
-            : snapshot.weekly.filter(\.isWeekly) + snapshot.weekly.filter { !$0.isWeekly }
-        var windows = longer.prefix(RingView.maxLanes - 1).map { (label: $0.label, pct: $0.pct) }
-        windows.append((label: snapshot.primaryWindowName, pct: snapshot.sessionPct))
-        return windows.enumerated().map { index, window in
+        return snapshot.ringWindows(maxLanes: RingView.maxLanes).enumerated().map { index, window in
             RingLimit(id: window.label, pct: window.pct,
                       color: laneColor(pct: window.pct, index: index, baseHue: baseHue))
         }
@@ -186,6 +176,9 @@ struct ProviderCardView: View {
                             .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
                             .help("Subscription plan")
                     }
+                    if let credits = snapshot.resetCredits, credits.available > 0 {
+                        ResetCreditTag(credits: credits, provider: snapshot.config.name)
+                    }
                     Spacer(minLength: 0)
                 }
                 .padding(.top, 3)
@@ -197,8 +190,8 @@ struct ProviderCardView: View {
                     DeleteButton(action: onDelete)
                 } else if snapshot.needsSignIn {
                     SignInBadge(config: snapshot.config)
-                } else if snapshot.isUnavailable {
-                    noDataBadge
+                } else if let failure = snapshot.failure {
+                    failureBadge(failure)
                 } else {
                     RingView(estimated: snapshot.isEstimated, limits: ringLimits)
                 }
@@ -209,33 +202,40 @@ struct ProviderCardView: View {
         }
     }
 
-    /// Stand-in for the ring when there's no data to plot — a muted dash so the
-    /// card doesn't imply a real 0%.
-    private var noDataBadge: some View {
-        ZStack {
-            Circle().stroke(theme.track, lineWidth: 4.5)
-            Text("—")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(theme.text3)
+    /// The ring's slot when there's nothing to plot. Deliberately ring-shaped and
+    /// deliberately loud: the failure *is* this card's reading, so it gets the
+    /// gauge's weight rather than a muted dash that reads as a real 0%. Dashed,
+    /// like the estimate lanes, because there is no measurement behind it.
+    private func failureBadge(_ failure: ProviderFailure) -> some View {
+        let tint = failure.isFault ? Theme.danger : Theme.warn
+        return ZStack {
+            Circle()
+                .stroke(tint.opacity(0.28),
+                        style: StrokeStyle(lineWidth: 4.5, dash: [3, 2.5]))
+            Image(systemName: failure.symbol)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(tint)
         }
         .frame(width: 38, height: 38)
         .padding(6)
         .overlay(alignment: .bottom) {
-            Text("no data")
-                .font(.system(size: 9.5))
-                .foregroundStyle(theme.text2)
+            Text(failure.badgeWord)
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(tint)
+                .lineLimit(1)
                 .offset(y: 7)
         }
+        .help(snapshot.note ?? failure.headline)
     }
 
     private var resetLine: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 4) {
-                Image(systemName: snapshot.isUnavailable ? "bolt.slash" : "clock")
+                Image(systemName: snapshot.failure?.symbol ?? "clock")
                     .font(.system(size: 10))
-                    .foregroundStyle(theme.text3)
-                if snapshot.isUnavailable {
-                    Text("No data")
+                    .foregroundStyle(snapshot.failure?.isFault == true ? Theme.danger : theme.text3)
+                if let failure = snapshot.failure {
+                    Text(failure.headline)
                 } else if let blocking = snapshot.blockingLimit {
                     Text(Self.blockingText(blocking, now: context.date))
                 } else if let resetAt = snapshot.sessionResetAt {
@@ -249,7 +249,7 @@ struct ProviderCardView: View {
             // Truncate rather than wrap: the longest of these ("Weekly resets in
             // 3d 19h") is a hair off the width, and wrapping would grow the card.
             .lineLimit(1)
-            .foregroundStyle(theme.text2)
+            .foregroundStyle(snapshot.failure?.isFault == true ? Theme.danger : theme.text2)
         }
     }
 
@@ -260,8 +260,8 @@ struct ProviderCardView: View {
                 .frame(height: 0.5)
                 .padding(.top, 11)
 
-            if snapshot.isUnavailable {
-                noDataDetail
+            if let failure = snapshot.failure {
+                failureDetail(failure)
             } else {
                 usageDetail
             }
@@ -285,13 +285,13 @@ struct ProviderCardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Expanded body when the login lapsed: no fabricated bars, just the state
-    /// and a one-line nudge on how to get data back.
-    private var noDataDetail: some View {
+    /// Expanded body when there's no reading: no fabricated bars, just what went
+    /// wrong and a one-line nudge on how to get data back.
+    private func failureDetail(_ failure: ProviderFailure) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("No usage data")
+            Text(failure.headline)
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(theme.text)
+                .foregroundStyle(failure.isFault ? Theme.danger : theme.text)
             if let note = snapshot.note {
                 Text(note)
                     .font(.system(size: 11.5))
@@ -318,7 +318,10 @@ struct ProviderCardView: View {
         }
 
         if !snapshot.weekly.isEmpty {
-            Text("Weekly limits")
+            // "Weekly limits" under a bar that *is* the weekly limit reads as a
+            // contradiction — when the primary window is the standing budget
+            // (Codex), what follows are the extra caps nested inside it.
+            Text(snapshot.hasSessionWindow ? "Weekly limits" : "Other limits")
                 .font(.system(size: 10.5, weight: .semibold))
                 .tracking(0.4)
                 .textCase(.uppercase)
@@ -421,6 +424,45 @@ struct UsageBar: View {
                 .foregroundStyle(theme.text2)
                 .padding(.top, -1)
         }
+    }
+}
+
+/// Spare window resets the account is holding — a glyph and a count, sized to sit
+/// third on a row that already carries the mood tag and the plan pill.
+///
+/// Lit only when the provider says a credit is spendable on the window you're
+/// actually blocked on: holding one that today's limit can't use is worth knowing
+/// about but isn't an escape hatch, and a bright green "1" would read as one.
+struct ResetCreditTag: View {
+    let credits: ResetCredits
+    let provider: String
+
+    @Environment(\.theme) private var theme
+
+    private var tint: Color { credits.isUsableNow ? Color(hex: 0x34C759) : theme.text2 }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: "arrow.counterclockwise")
+                .font(.system(size: 8.5, weight: .bold))
+            Text("\(credits.available)")
+                .font(.system(size: 10, weight: .bold))
+                .monospacedDigit()
+        }
+        .foregroundStyle(tint)
+        .lineLimit(1)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1.5)
+        .background(tint.opacity(credits.isUsableNow ? 0.16 : 0.10),
+                    in: RoundedRectangle(cornerRadius: 6))
+        .help(helpText)
+    }
+
+    private var helpText: String {
+        let noun = credits.available == 1 ? "reset" : "resets"
+        return credits.isUsableNow
+            ? "\(credits.available) limit \(noun) available — \(credits.applicable) can clear the window blocking you now"
+            : "\(credits.available) limit \(noun) available, but none applies to \(provider)'s current window"
     }
 }
 
