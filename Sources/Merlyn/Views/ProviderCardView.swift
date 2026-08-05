@@ -27,7 +27,7 @@ struct ProviderCardView: View {
                     .transition(.opacity)
             }
         }
-        .padding(12)
+        .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
         .background(
             RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .fill(hovering ? theme.cardBackgroundHover : theme.cardBackground)
@@ -99,13 +99,18 @@ struct ProviderCardView: View {
                 }
             }
 
+            // Nothing in here may be `fixedSize()`. Every card is as wide as the
+            // widest one, so a single rigid row wider than the panel pushes the
+            // whole list past the panel edge and swallows its side padding — a
+            // visible shift the moment plan pills arrive from the API.
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(snapshot.config.name)
                         .font(.system(size: 14.5, weight: .semibold))
                         .tracking(-0.2)
                         .foregroundStyle(theme.text)
-                        .fixedSize()
+                        .lineLimit(1)
+                        .layoutPriority(1)
                     Text(snapshot.config.account)
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(0.2)
@@ -114,7 +119,21 @@ struct ProviderCardView: View {
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1.5)
                         .background(theme.chip, in: RoundedRectangle(cornerRadius: 6))
-                        .fixedSize()
+                    Spacer(minLength: 0)
+                }
+                resetLine
+                // The plan pill rides with the mood tag rather than the title: the
+                // title row has the least slack (name + account chip already), and
+                // this line is otherwise near-empty.
+                HStack(spacing: 5) {
+                    Text(snapshot.mood.tagWord)
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(0.4)
+                        .foregroundStyle(snapshot.mood.tagForeground)
+                        .lineLimit(1)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(snapshot.mood.tagBackground, in: RoundedRectangle(cornerRadius: 6))
                     if let plan = snapshot.plan {
                         Text(plan)
                             .font(.system(size: 10, weight: .semibold))
@@ -124,20 +143,11 @@ struct ProviderCardView: View {
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1.5)
                             .background(accent.opacity(0.16), in: RoundedRectangle(cornerRadius: 6))
-                            .fixedSize()
                             .help("Subscription plan")
                     }
                     Spacer(minLength: 0)
                 }
-                resetLine
-                Text(snapshot.mood.tagWord)
-                    .font(.system(size: 10, weight: .bold))
-                    .tracking(0.4)
-                    .foregroundStyle(snapshot.mood.tagForeground)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(snapshot.mood.tagBackground, in: RoundedRectangle(cornerRadius: 6))
-                    .padding(.top, 3)
+                .padding(.top, 3)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 

@@ -135,7 +135,7 @@ struct AddProviderForm: View {
                 .disabled(!canSave)
             }
         }
-        .padding(12)
+        .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
         .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 15, style: .continuous)

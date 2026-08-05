@@ -39,7 +39,9 @@ struct DockView: View {
                         providerList
                     }
                 }
-                .padding(EdgeInsets(top: 2, leading: 12, bottom: 12, trailing: 12))
+                // Leading matches the header's 16 so cards line up under the title,
+                // and keeps them clear of the collapse tab on the panel's edge.
+                .padding(EdgeInsets(top: 2, leading: 16, bottom: 12, trailing: 16))
                 // Reset the drag state when a card is dropped in a gap (no card
                 // delegate fires), so the faded card snaps back to full opacity.
                 .onDrop(of: [.text], isTargeted: nil) { _ in
@@ -237,7 +239,7 @@ struct AddProviderCard: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(EdgeInsets(top: 13, leading: 12, bottom: 13, trailing: 12))
+            .padding(EdgeInsets(top: 13, leading: 14, bottom: 13, trailing: 14))
             .background(hovering ? theme.chip : .clear, in: RoundedRectangle(cornerRadius: 15))
             .overlay(
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
