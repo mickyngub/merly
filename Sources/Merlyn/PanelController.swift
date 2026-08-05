@@ -23,7 +23,9 @@ final class PanelController: NSObject {
     private(set) var state: DockState = .hidden
 
     static let panelWidth: CGFloat = 336
-    static let handleOverhang: CGFloat = 13
+    /// How far the collapse tab bulges out past the panel's left edge.
+    static let handleOverhang: CGFloat = 16
+    static let handleHeight: CGFloat = 54
     static let railWidth: CGFloat = 46
 
     private let engine: UsageEngine
@@ -247,14 +249,17 @@ struct PanelRootView: View {
 
     var body: some View {
         let theme = Theme.resolve(scheme)
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 16, bottomLeadingRadius: 16,
-            bottomTrailingRadius: 0, topTrailingRadius: 0,
-            style: .continuous
+        let shape = PanelShape(
+            tabWidth: PanelController.handleOverhang,
+            tabHeight: PanelController.handleHeight,
+            cornerRadius: 16
         )
         DockView(engine: engine, openGeneration: panelState.openGeneration, initialScreen: panelState.initialScreen)
         .frame(width: PanelController.panelWidth)
         .frame(maxHeight: .infinity)
+        // The tab lives in this inset, so the material and border below cover the
+        // panel body and the tab in one pass.
+        .padding(.leading, PanelController.handleOverhang)
         .background {
             ZStack {
                 VisualEffect()
@@ -262,8 +267,7 @@ struct PanelRootView: View {
             }
         }
         .clipShape(shape)
-        .overlay(shape.strokeBorder(theme.panelEdge, lineWidth: 0.5))
-        .padding(.leading, PanelController.handleOverhang)
+        .overlay(shape.stroke(theme.panelEdge, lineWidth: 0.5))
         .overlay(alignment: .leading) {
             HandleButton(action: onCollapse)
         }
@@ -271,6 +275,50 @@ struct PanelRootView: View {
     }
 }
 
+/// The dock's silhouette: a screen-edge-anchored rounded rectangle with the
+/// collapse tab bulging out of its left edge.
+///
+/// Drawn as ONE shape on purpose. When the tab was its own view stacked on top,
+/// it painted a second `panelTint` over the panel's left edge — a darker slab
+/// across the first card — and stroked a border straight down the seam where the
+/// two met. Sharing the panel's material and outline removes both.
+struct PanelShape: Shape {
+    let tabWidth: CGFloat
+    let tabHeight: CGFloat
+    let cornerRadius: CGFloat
+
+    /// Fully rounds the tab's outer edge, so it reads as a pull-tab rather than a
+    /// rectangle glued to the panel.
+    private var tabRadius: CGFloat { min(tabWidth / 2, tabHeight / 2) }
+
+    func path(in rect: CGRect) -> Path {
+        let edge = rect.minX + tabWidth        // the panel body's left edge
+        let tabTop = rect.midY - tabHeight / 2
+        let tabBottom = rect.midY + tabHeight / 2
+
+        var path = Path()
+        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        // Top edge → top-leading corner → down the body's left edge to the tab.
+        path.addArc(tangent1End: CGPoint(x: edge, y: rect.minY),
+                    tangent2End: CGPoint(x: edge, y: tabTop), radius: cornerRadius)
+        path.addLine(to: CGPoint(x: edge, y: tabTop))
+        // Out along the tab's top, around its rounded outer edge, and back in.
+        path.addArc(tangent1End: CGPoint(x: rect.minX, y: tabTop),
+                    tangent2End: CGPoint(x: rect.minX, y: tabBottom), radius: tabRadius)
+        path.addArc(tangent1End: CGPoint(x: rect.minX, y: tabBottom),
+                    tangent2End: CGPoint(x: edge, y: tabBottom), radius: tabRadius)
+        path.addLine(to: CGPoint(x: edge, y: tabBottom))
+        // Down to the bottom-leading corner and out along the bottom edge.
+        path.addArc(tangent1End: CGPoint(x: edge, y: rect.maxY),
+                    tangent2End: CGPoint(x: rect.maxX, y: rect.maxY), radius: cornerRadius)
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// The chevron inside the panel's collapse tab. The tab itself is part of
+/// `PanelShape`, so this is only the glyph plus a slightly wider hit area.
 struct HandleButton: View {
     let action: () -> Void
 
@@ -279,19 +327,16 @@ struct HandleButton: View {
 
     var body: some View {
         let theme = Theme.resolve(scheme)
-        let shape = UnevenRoundedRectangle(
-            topLeadingRadius: 9, bottomLeadingRadius: 9,
-            bottomTrailingRadius: 4, topTrailingRadius: 4,
-            style: .continuous
-        )
         Button(action: action) {
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(hovering ? theme.text : theme.text2)
-                .frame(width: 26, height: 54)
-                .background { ZStack { VisualEffect(); theme.panelTint } }
-                .clipShape(shape)
-                .overlay(shape.strokeBorder(theme.panelEdge, lineWidth: 0.5))
+                .frame(width: PanelController.handleOverhang,
+                       height: PanelController.handleHeight)
+                // Reaches a little past the seam so the tab is easy to grab,
+                // without shifting the glyph off the tab's center.
+                .padding(.trailing, 7)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
