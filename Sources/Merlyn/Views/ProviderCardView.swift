@@ -290,6 +290,32 @@ struct ProviderCardView: View {
     }
 }
 
+/// A capsule filled to `fraction` of the space it's given.
+///
+/// The fraction is the shape's only animatable data, so a bar grows when its
+/// number changes and re-lays-out instantly when the layout changes. Driving the
+/// fill with `frame(width: geo.size.width * pct)` instead puts a pixel width
+/// inside the same transaction, so a card resizing while `pct` animates made the
+/// fill slide sideways from its old geometry — bars smearing across the panel as
+/// usage landed.
+struct BarFill: Shape, Animatable {
+    var fraction: Double
+    /// Keeps a stub visible at zero. The level bar wants one; usage bars don't.
+    var minWidth: CGFloat = 0
+
+    var animatableData: Double {
+        get { fraction }
+        set { fraction = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let width = max(minWidth, rect.width * min(max(fraction, 0), 1))
+        guard width > 0 else { return Path() }
+        return Capsule().path(in: CGRect(x: rect.minX, y: rect.minY,
+                                        width: width, height: rect.height))
+    }
+}
+
 /// A labeled usage bar: title + "N% used", progress fill, and a reset caption.
 /// Used for both the current-session (5h) and weekly windows.
 struct UsageBar: View {
@@ -316,14 +342,11 @@ struct UsageBar: View {
                     .monospacedDigit()
                     .foregroundStyle(theme.text2)
             }
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(theme.track)
-                    Capsule()
-                        .fill(fill)
-                        .frame(width: max(0, geo.size.width * pct / 100))
-                        .animation(Theme.snappy(0.5), value: pct)
-                }
+            ZStack(alignment: .leading) {
+                Capsule().fill(theme.track)
+                BarFill(fraction: pct / 100)
+                    .fill(fill)
+                    .animation(Theme.snappy(0.5), value: pct)
             }
             .frame(height: 6)
             Text(caption)
@@ -389,12 +412,9 @@ struct MascotLevelBar: View {
                 .fixedSize()
             ZStack(alignment: .leading) {
                 Capsule().fill(theme.track)
-                GeometryReader { geo in
-                    Capsule()
-                        .fill(accent)
-                        .frame(width: max(2, geo.size.width * xp))
-                        .animation(Theme.snappy(0.5), value: xp)
-                }
+                BarFill(fraction: xp, minWidth: 2)
+                    .fill(accent)
+                    .animation(Theme.snappy(0.5), value: xp)
             }
             .frame(height: 3)
         }
