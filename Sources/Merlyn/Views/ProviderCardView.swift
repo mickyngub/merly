@@ -19,6 +19,47 @@ struct ProviderCardView: View {
 
     private var accent: Color { snapshot.config.resolvedPalette.accent }
 
+    /// Ring lanes, outermost first: the longest window out on the rim, down to the
+    /// 5h session innermost. Estimated providers contribute only the session — their
+    /// weekly figures are "vs your busiest week" ratios that trend to 100%.
+    ///
+    /// The session holds the innermost lane unconditionally, so "right now" is
+    /// always in the same place and can never be the lane truncation drops.
+    private var ringLimits: [RingLimit] {
+        let baseHue = Fate.hue(slot: snapshot.config.resolvedColorSlot,
+                               shiny: snapshot.config.isShiny)
+        // Partitioned rather than sorted: Swift's sort isn't stable, and two weekly
+        // caps tie, so sorting could swap lanes between renders.
+        let longer = snapshot.isEstimated
+            ? []
+            : snapshot.weekly.filter(\.isWeekly) + snapshot.weekly.filter { !$0.isWeekly }
+        var windows = longer.prefix(RingView.maxLanes - 1).map { (label: $0.label, pct: $0.pct) }
+        windows.append((label: snapshot.primaryWindowName, pct: snapshot.sessionPct))
+        return windows.enumerated().map { index, window in
+            RingLimit(id: window.label, pct: window.pct,
+                      color: laneColor(pct: window.pct, index: index, baseHue: baseHue))
+        }
+    }
+
+    /// Lane hue identifies the *window*, stepped 55° off the provider's own hue so
+    /// the lanes are tellable apart while the ring still reads as this provider's.
+    ///
+    /// Severity keeps exactly one override: a lane at or past the danger threshold
+    /// goes red. Being about to get blocked is the one thing worth breaking the
+    /// colour scheme for — the amber warn band stays on the bars, which have labels.
+    private func laneColor(pct: Double, index: Int, baseHue: Double) -> Color {
+        guard pct < Theme.dangerPct else { return Theme.danger }
+        return MascotPalette.fromHue(baseHue + Double(index) * 55).accent
+    }
+
+    /// The colour a window's bar shares with its ring lane, matched on label. Ties
+    /// the two views together: the arc and the bar are the same limit, so reading
+    /// them as one object is the whole point of colouring lanes by category.
+    private func laneColor(matching label: String) -> Color {
+        ringLimits.first { $0.id == label }?.color
+            ?? Theme.usageColor(pct: 0, accent: accent)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             cardTop
@@ -151,13 +192,20 @@ struct ProviderCardView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if editing {
-                DeleteButton(action: onDelete)
-            } else if snapshot.isUnavailable {
-                noDataBadge
-            } else {
-                RingView(pct: snapshot.sessionPct, accent: accent, estimated: snapshot.isEstimated)
+            Group {
+                if editing {
+                    DeleteButton(action: onDelete)
+                } else if snapshot.needsSignIn {
+                    SignInBadge(config: snapshot.config)
+                } else if snapshot.isUnavailable {
+                    noDataBadge
+                } else {
+                    RingView(estimated: snapshot.isEstimated, limits: ringLimits)
+                }
             }
+            // The ring is a circle, so its widest point lands exactly on the reset
+            // line — the row's longest text. Without this they nearly touch.
+            .padding(.leading, 6)
         }
     }
 
@@ -188,6 +236,8 @@ struct ProviderCardView: View {
                     .foregroundStyle(theme.text3)
                 if snapshot.isUnavailable {
                     Text("No data")
+                } else if let blocking = snapshot.blockingLimit {
+                    Text(Self.blockingText(blocking, now: context.date))
                 } else if let resetAt = snapshot.sessionResetAt {
                     Text("Resets in \(Self.duration(until: resetAt, now: context.date))")
                 } else {
@@ -196,6 +246,9 @@ struct ProviderCardView: View {
             }
             .font(.system(size: 12))
             .monospacedDigit()
+            // Truncate rather than wrap: the longest of these ("Weekly resets in
+            // 3d 19h") is a hair off the width, and wrapping would grow the card.
+            .lineLimit(1)
             .foregroundStyle(theme.text2)
         }
     }
@@ -252,14 +305,15 @@ struct ProviderCardView: View {
         // Current session (5h window) — the same figure as the ring, shown
         // as a labeled bar so it sits alongside the weekly limits.
         TimelineView(.periodic(from: .now, by: 1)) { context in
+            // Named from the span the provider reports. Codex's primary window is
+            // 7 days, so "Current session · 5h limit" was wrong there on both counts.
             UsageBar(
-                label: "Current session",
+                label: snapshot.hasSessionWindow ? "Current session" : "\(snapshot.primaryWindowName) usage",
                 pct: snapshot.sessionPct,
                 caption: snapshot.sessionResetAt.map {
-                    "5h limit · resets in \(Self.duration(until: $0, now: context.date))"
-                } ?? "5h limit · no active session",
-                accent: accent,
-                estimated: snapshot.isEstimated
+                    "\(snapshot.primaryWindowName) limit · resets in \(Self.duration(until: $0, now: context.date))"
+                } ?? "\(snapshot.primaryWindowName) limit · no active session",
+                color: laneColor(matching: snapshot.primaryWindowName)
             )
         }
 
@@ -274,9 +328,19 @@ struct ProviderCardView: View {
         ForEach(snapshot.weekly) { metric in
             UsageBar(
                 label: metric.label, pct: metric.pct, caption: metric.resetText,
-                accent: accent, estimated: snapshot.isEstimated
+                color: laneColor(matching: metric.label)
             )
         }
+    }
+
+    /// What's standing between you and the next request, for the clock line. Kept
+    /// short enough to sit on one line beside the mascot and the ring.
+    static func blockingText(_ blocking: WeeklyMetric, now: Date) -> String {
+        let word = blocking.isWeekly ? "Weekly" : "5h cap"
+        // Terse because the wider nested ring leaves this line ~136pt; the clock
+        // glyph beside it already supplies "resets".
+        guard let resetAt = blocking.resetAt else { return "\(word) maxed" }
+        return "\(word) in \(duration(until: resetAt, now: now))"
     }
 
     static func duration(until end: Date, now: Date) -> String {
@@ -284,6 +348,8 @@ struct ProviderCardView: View {
         if remaining <= 0 { return "now" }
         let minutes = Int(remaining / 60)
         let hours = minutes / 60
+        // Weekly windows are days out; "91h 55m" is unreadable as a countdown.
+        if hours >= 24 { return "\(hours / 24)d \(hours % 24)h" }
         if hours > 0 { return "\(hours)h \(minutes % 60)m" }
         let seconds = Int(remaining) % 60
         return "\(minutes)m \(seconds)s"
@@ -322,15 +388,16 @@ struct UsageBar: View {
     let label: String
     let pct: Double
     let caption: String
-    let accent: Color
-    /// Estimated bars use the provider accent and never escalate to amber/red —
-    /// a "vs your busiest week" ratio hitting 100% is not a real warning.
-    var estimated: Bool = false
+    /// Supplied by the card, matched to this window's ring lane. The escalation to
+    /// red lives there too, so the bar and the arc can't disagree — and an
+    /// estimated provider stays on its own hue rather than escalating off a "vs
+    /// your busiest week" ratio that hits 100% by construction.
+    let color: Color
 
     @Environment(\.theme) private var theme
 
     var body: some View {
-        let fill = estimated ? accent : Theme.usageColor(pct: pct, accent: accent)
+        let fill = color
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline) {
                 Text(label)
@@ -420,6 +487,41 @@ struct MascotLevelBar: View {
         }
         .frame(width: 52)
         .help("Level \(level) · \(Int((xp * 100).rounded()))% to the next level")
+    }
+}
+
+/// Sign-in affordance in the card's trailing slot, standing in for the session
+/// ring when a login has lapsed. Deliberately the same 50pt footprint as
+/// `noDataBadge`, so a card that gains it can't widen the list.
+struct SignInBadge: View {
+    let config: ProviderConfig
+
+    @State private var hovering = false
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        Button { LoginLauncher.openLogin(for: config) } label: {
+            ZStack {
+                Circle()
+                    .fill(hovering ? Color(hex: 0x4C8DFF) : theme.chip)
+                Circle()
+                    .stroke(hovering ? .clear : theme.track, lineWidth: 1)
+                Image(systemName: "person.badge.key")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(hovering ? .white : theme.text2)
+            }
+            .frame(width: 38, height: 38)
+            .padding(6)
+            .overlay(alignment: .bottom) {
+                Text("sign in")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(hovering ? theme.text : theme.text2)
+                    .offset(y: 7)
+            }
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help("Sign in to \(config.name) — runs `\(config.loginShellCommand)` in a terminal")
     }
 }
 

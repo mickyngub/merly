@@ -153,6 +153,10 @@ func flexDouble(_ value: Any?) -> Double? {
 struct UsageWindow {
     var usedPct: Double
     var resetsAt: Date?
+    /// How long this window spans, when the provider says. Never assume: Codex
+    /// moved its primary window from 5h to 7 days, and every label derived from
+    /// the old assumption ("5h limit · resets in 3d 18h") became a lie.
+    var windowSeconds: Double?
 }
 
 // MARK: - Claude
@@ -214,13 +218,17 @@ enum ClaudeUsageAPI {
             ]
         )
 
-        func window(_ key: String) -> UsageWindow? {
+        // Claude names its windows in the key itself, so the span is implied rather
+        // than reported; state it explicitly so nothing downstream has to assume.
+        func window(_ key: String, seconds: Double?) -> UsageWindow? {
             guard let w = obj[key] as? [String: Any],
                   let pct = flexDouble(w["utilization"]) else { return nil }
-            return UsageWindow(usedPct: pct, resetsAt: parseAPIDate(w["resets_at"]))
+            return UsageWindow(usedPct: pct, resetsAt: parseAPIDate(w["resets_at"]),
+                               windowSeconds: seconds)
         }
 
-        var usage = Usage(fiveHour: window("five_hour"), sevenDay: window("seven_day"))
+        var usage = Usage(fiveHour: window("five_hour", seconds: 5 * 3600),
+                          sevenDay: window("seven_day", seconds: 7 * 86400))
 
         // Per-model weekly caps (Fable, and now Sonnet/Opus too) arrive in a
         // unified `limits[]` array, each labeled by the model's display name; the
@@ -233,12 +241,13 @@ enum ClaudeUsageAPI {
                 guard let pct = flexDouble(item["percent"]),
                       let name = ((item["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
                 else { continue }
-                let w = UsageWindow(usedPct: pct, resetsAt: parseAPIDate(item["resets_at"]))
+                let w = UsageWindow(usedPct: pct, resetsAt: parseAPIDate(item["resets_at"]),
+                                    windowSeconds: 7 * 86400)
                 usage.sevenDayModels.append(("\(name) only", w))
             }
         } else {
             for (key, label) in [("seven_day_sonnet", "Sonnet only"), ("seven_day_opus", "Opus only")] {
-                if let w = window(key), w.usedPct > 0 || w.resetsAt != nil {
+                if let w = window(key, seconds: 7 * 86400), w.usedPct > 0 || w.resetsAt != nil {
                     usage.sevenDayModels.append((label, w))
                 }
             }
@@ -305,7 +314,8 @@ enum CodexUsageAPI {
         func window(_ container: [String: Any]?, _ key: String) -> UsageWindow? {
             guard let w = container?[key] as? [String: Any],
                   let pct = flexDouble(w["used_percent"]) else { return nil }
-            return UsageWindow(usedPct: pct, resetsAt: parseAPIDate(w["reset_at"]))
+            return UsageWindow(usedPct: pct, resetsAt: parseAPIDate(w["reset_at"]),
+                               windowSeconds: flexDouble(w["limit_window_seconds"]))
         }
 
         let rateLimit = obj["rate_limit"] as? [String: Any]
@@ -360,33 +370,32 @@ enum KimiUsageAPI {
             headers: ["Authorization": "Bearer \(token)"]
         )
 
-        func window(_ dict: [String: Any]?) -> UsageWindow? {
+        func window(_ dict: [String: Any]?, seconds: Double?) -> UsageWindow? {
             guard let dict, let limit = flexDouble(dict["limit"]), limit > 0 else { return nil }
             let used = flexDouble(dict["used"])
                 ?? flexDouble(dict["remaining"]).map { limit - $0 }
                 ?? 0
             return UsageWindow(
                 usedPct: min(100, max(0, used / limit * 100)),
-                resetsAt: parseAPIDate(dict["resetTime"] ?? dict["resetAt"] ?? dict["reset_at"])
+                resetsAt: parseAPIDate(dict["resetTime"] ?? dict["resetAt"] ?? dict["reset_at"]),
+                windowSeconds: seconds
             )
         }
 
-        var usage = Usage(weekly: window(obj["usage"] as? [String: Any]))
+        var usage = Usage(weekly: window(obj["usage"] as? [String: Any], seconds: 7 * 86400))
         for item in obj["limits"] as? [[String: Any]] ?? [] {
             let detail = (item["detail"] as? [String: Any]) ?? item
-            guard let w = window(detail) else { continue }
             let win = item["window"] as? [String: Any]
-            let label: String
-            if let duration = flexDouble(win?["duration"]) {
+            // Reported as duration + unit; an unrecognised unit means the value is
+            // already seconds.
+            let seconds = flexDouble(win?["duration"]).map { duration -> Double in
                 let unit = win?["timeUnit"] as? String ?? ""
-                let minutes = unit.contains("MINUTE") ? duration
-                    : unit.contains("HOUR") ? duration * 60
-                    : unit.contains("DAY") ? duration * 1440 : duration / 60
-                label = minutes.truncatingRemainder(dividingBy: 60) == 0
-                    ? "\(Int(minutes / 60))h limit" : "\(Int(minutes))m limit"
-            } else {
-                label = "Rate limit"
+                return unit.contains("MINUTE") ? duration * 60
+                    : unit.contains("HOUR") ? duration * 3600
+                    : unit.contains("DAY") ? duration * 86400 : duration
             }
+            guard let w = window(detail, seconds: seconds) else { continue }
+            let label = seconds == nil ? "Rate limit" : "\(LimitWindow.name(seconds: seconds)) limit"
             usage.shortWindows.append((label, w))
         }
         if let user = obj["user"] as? [String: Any],

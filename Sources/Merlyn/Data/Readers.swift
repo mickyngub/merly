@@ -181,13 +181,15 @@ struct ClaudeReader: UsageReader {
             if let week = usage.sevenDay {
                 weekly.append(WeeklyMetric(
                     label: "All models", pct: week.usedPct,
-                    resetText: weeklyResetText(week.resetsAt)
+                    resetText: weeklyResetText(week.resetsAt),
+                    resetAt: week.resetsAt
                 ))
             }
             for (label, window) in usage.sevenDayModels {
                 weekly.append(WeeklyMetric(
                     label: label, pct: window.usedPct,
-                    resetText: weeklyResetText(window.resetsAt)
+                    resetText: weeklyResetText(window.resetsAt),
+                    resetAt: window.resetsAt
                 ))
             }
             return ProviderSnapshot(
@@ -197,6 +199,7 @@ struct ClaudeReader: UsageReader {
                 weekly: weekly,
                 isActive: recentActivity(under: projectsRoot, now: now),
                 isEstimated: false,
+                sessionWindowSeconds: usage.fiveHour?.windowSeconds,
                 plan: usage.planLabel
             )
         }, fallback: { error in
@@ -207,9 +210,9 @@ struct ClaudeReader: UsageReader {
             // it back — don't tell the user to sign in. Missing creds do need it.
             if error?.isAuthLapse == true {
                 let note = error?.isExpiredLogin == true
-                    ? "Run any \(config.name) command to refresh"
-                    : "Sign in again — run any \(config.name) command"
-                return .unavailable(config, note: note)
+                    ? "Expired — sign in, or run any \(config.name) command"
+                    : "Signed out — sign in to see usage again"
+                return .unavailable(config, note: note, needsSignIn: true)
             }
             // Server unreachable with no fresh cache left to ride on → same
             // honest "No data"/offline mascot rather than a fabricated estimate.
@@ -260,7 +263,8 @@ struct ClaudeReader: UsageReader {
         let active = files.contains { now.timeIntervalSince($0.mtime) < activeThreshold }
         return ProviderSnapshot(
             config: config, sessionPct: result.pct, sessionResetAt: result.resetAt,
-            weekly: result.weekly, isActive: active, isEstimated: true, note: nil
+            weekly: result.weekly, isActive: active, isEstimated: true,
+            sessionWindowSeconds: app.sessionHours * 3600, note: nil
         )
     }
 
@@ -304,6 +308,20 @@ struct ClaudeReader: UsageReader {
 // MARK: - Codex
 
 struct CodexReader: UsageReader {
+    /// A per-model cap, labelled and classified by the span the API reports for it.
+    private func extraMetric(name: String, window w: UsageWindow) -> WeeklyMetric {
+        let isWeekly = LimitWindow.isWeekly(seconds: w.windowSeconds)
+        return WeeklyMetric(
+            label: "\(name) · \(LimitWindow.name(seconds: w.windowSeconds).lowercased())",
+            pct: w.usedPct,
+            resetText: isWeekly
+                ? weeklyResetText(w.resetsAt)
+                : w.resetsAt.map { "Resets \(resetFormatter.string(from: $0))" } ?? "",
+            resetAt: w.resetsAt,
+            isWeeklyWindow: isWeekly
+        )
+    }
+
     func read(config: ProviderConfig, app: AppConfig, ctx: inout ReaderContext, now: Date) -> ProviderSnapshot {
         let sessionsRoot = URL(fileURLWithPath: config.expandedDir).appendingPathComponent("sessions")
         var snap = apiFirst(config: config, ctx: &ctx, now: now, fetch: {
@@ -312,21 +330,18 @@ struct CodexReader: UsageReader {
             if let week = usage.secondary {
                 weekly.append(WeeklyMetric(
                     label: "Weekly", pct: week.usedPct,
-                    resetText: weeklyResetText(week.resetsAt)
+                    resetText: weeklyResetText(week.resetsAt),
+                    resetAt: week.resetsAt
                 ))
             }
             for extra in usage.additional {
+                // Both slots are named for the span the API reports, not for the
+                // field they arrived in — Codex serves 7-day caps in `primary_window`.
                 if let w = extra.fiveHour, w.usedPct > 0 || extra.weekly == nil {
-                    weekly.append(WeeklyMetric(
-                        label: "\(extra.name) · 5h", pct: w.usedPct,
-                        resetText: w.resetsAt.map { "Resets \(resetFormatter.string(from: $0))" } ?? ""
-                    ))
+                    weekly.append(extraMetric(name: extra.name, window: w))
                 }
                 if let w = extra.weekly {
-                    weekly.append(WeeklyMetric(
-                        label: "\(extra.name) · weekly", pct: w.usedPct,
-                        resetText: weeklyResetText(w.resetsAt)
-                    ))
+                    weekly.append(extraMetric(name: extra.name, window: w))
                 }
             }
             return ProviderSnapshot(
@@ -336,6 +351,7 @@ struct CodexReader: UsageReader {
                 weekly: Array(weekly.prefix(4)),
                 isActive: recentActivity(under: sessionsRoot, now: now),
                 isEstimated: false,
+                sessionWindowSeconds: usage.primary?.windowSeconds,
                 plan: usage.planLabel
             )
         }, fallback: { error in
@@ -345,8 +361,13 @@ struct CodexReader: UsageReader {
             if let real = rolloutFallback(config: config, now: now, root: sessionsRoot) {
                 return real
             }
-            // Nothing on disk either: a server we couldn't reach is a true
-            // offline/no-data state; otherwise it's just an empty profile.
+            // Nothing on disk either. A lapsed login is the one cause the user can
+            // act on, so say so and offer the sign-in; an unreachable server is a
+            // true offline state; anything else is just an empty profile.
+            if error?.isAuthLapse == true {
+                return .unavailable(config, note: "Signed out — sign in to see usage again",
+                                    needsSignIn: true)
+            }
             return error?.isServerUnreachable == true
                 ? .unavailable(config, note: "Offline — can't reach \(config.name)")
                 : .empty(config, note: "No rate-limit history in \(config.dir)")
@@ -456,13 +477,15 @@ struct KimiReader: UsageReader {
             if let week = usage.weekly {
                 weekly.append(WeeklyMetric(
                     label: "Weekly", pct: week.usedPct,
-                    resetText: weeklyResetText(week.resetsAt)
+                    resetText: weeklyResetText(week.resetsAt),
+                    resetAt: week.resetsAt
                 ))
             }
             for (label, window) in usage.shortWindows.dropFirst() {
                 weekly.append(WeeklyMetric(
                     label: label, pct: window.usedPct,
-                    resetText: window.resetsAt.map { "Resets \(resetFormatter.string(from: $0))" } ?? ""
+                    resetText: window.resetsAt.map { "Resets \(resetFormatter.string(from: $0))" } ?? "",
+                    resetAt: window.resetsAt, isWeeklyWindow: false
                 ))
             }
             return ProviderSnapshot(
@@ -472,11 +495,13 @@ struct KimiReader: UsageReader {
                 weekly: weekly,
                 isActive: recentActivity(under: sessionsRoot, now: now),
                 isEstimated: false,
+                sessionWindowSeconds: session?.windowSeconds,
                 plan: usage.planLabel
             )
         }, fallback: { error in
             if error?.isAuthLapse == true {
-                return .unavailable(config, note: "Sign in again — run any \(config.name) command")
+                return .unavailable(config, note: "Signed out — sign in to see usage again",
+                                    needsSignIn: true)
             }
             if error?.isServerUnreachable == true {
                 return .unavailable(config, note: "Offline — can't reach \(config.name)")

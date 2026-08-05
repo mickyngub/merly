@@ -49,9 +49,21 @@ struct Theme {
     }
 
     /// Ring/bar warning escalation from the prototype: amber at 66%, red at 88%.
+    static let warnPct: Double = 66
+    static let dangerPct: Double = 88
+
+    /// Where a limit stops being "nearly out" and starts actually blocking work.
+    /// Deliberately not `dangerPct`: a red 94% weekly is still usable, and saying
+    /// "maxed" there is wrong. 99.5 rather than 100 so it agrees with the rounded
+    /// "100% used" the bars print — the API reports fractions like 99.6.
+    static let exhaustedPct: Double = 99.5
+
+    static let danger = Color(hex: 0xE5484D)
+    static let warn = Color(hex: 0xE8A33D)
+
     static func usageColor(pct: Double, accent: Color) -> Color {
-        if pct >= 88 { return Color(hex: 0xE5484D) }
-        if pct >= 66 { return Color(hex: 0xE8A33D) }
+        if pct >= dangerPct { return danger }
+        if pct >= warnPct { return warn }
         return accent
     }
 

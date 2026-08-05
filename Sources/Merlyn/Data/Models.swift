@@ -27,6 +27,31 @@ enum ProviderKind: String, Codable, CaseIterable {
         }
     }
 
+    /// The CLI subcommand that starts this kind's own sign-in flow.
+    ///
+    /// Merlyn never mints or refreshes a token itself — see the never-refresh rule
+    /// in `docs/decisions/usage-readers`. The sign-in button runs the CLI's login
+    /// in a terminal and lets it own the credentials, exactly as if the user had
+    /// opened the agent and typed this.
+    var loginCommand: String {
+        switch self {
+        case .claude: "claude auth login"
+        case .codex: "codex login"
+        case .kimi: "kimi login"
+        }
+    }
+
+    /// Env var that points this kind's CLI at a non-default config dir, so a
+    /// second account (`~/.claude-2`, `~/.claude-work`) signs into its own profile
+    /// instead of overwriting the first. nil when the CLI has no such override.
+    var configDirEnvVar: String? {
+        switch self {
+        case .claude: "CLAUDE_CONFIG_DIR"
+        case .codex: "CODEX_HOME"
+        case .kimi: nil
+        }
+    }
+
     /// Sprite sheets this kind's mascot may use — its own family only, so the
     /// editor can't dress a Claude provider up as Codex/Kimi. One art per kind:
     /// color is set by the palette (the old "Work" sprite was just a blue Clawd).
@@ -105,11 +130,18 @@ enum Fate {
             .truncatingRemainder(dividingBy: 360)
     }
 
+    /// The hue a mascot actually wears: its deck hue, shifted for a shiny. Exposed
+    /// so anything deriving companion colours (the card's ring lanes) starts from
+    /// the same hue the mascot is wearing rather than the unshifted deck value.
+    static func hue(slot: Int, shiny: Bool, home: String = NSHomeDirectory()) -> Double {
+        deckHue(slot: slot, home: home) + (shiny ? 150 : 0)
+    }
+
     /// The resolved palette for a mascot in `slot`, gleaming if `shiny`.
     static func palette(slot: Int, shiny: Bool, home: String = NSHomeDirectory()) -> MascotPalette {
-        let hue = deckHue(slot: slot, home: home)
+        let hue = hue(slot: slot, shiny: shiny, home: home)
         return shiny
-            ? .fromHue(hue + 150, satBoost: 0.08, lightBoost: 0.04)
+            ? .fromHue(hue, satBoost: 0.08, lightBoost: 0.04)
             : .fromHue(hue)
     }
 
@@ -155,6 +187,16 @@ struct ProviderConfig: Codable, Identifiable, Equatable {
         (dir as NSString).expandingTildeInPath
     }
 
+    /// The shell line that signs this specific provider back in: the CLI's own
+    /// login, prefixed with the config-dir env var when this provider doesn't live
+    /// in the kind's default folder (a second account signs into its own profile).
+    var loginShellCommand: String {
+        guard dir != kind.defaultDir, let envVar = kind.configDirEnvVar else {
+            return kind.loginCommand
+        }
+        return "\(envVar)=\(expandedDir.shellQuoted) \(kind.loginCommand)"
+    }
+
     var resolvedStyle: MascotStyle {
         if let style { return style }
         switch kind {
@@ -185,10 +227,43 @@ struct ProviderConfig: Codable, Identifiable, Equatable {
     }
 }
 
+/// Naming and classifying a limit window by the span the provider reports.
+///
+/// Nothing may hardcode "5h" or "weekly" from a field's name: Codex moved its
+/// primary window from 5h to 7 days with no rename, so every label built on that
+/// assumption ("5h limit · resets in 3d 18h") started lying.
+enum LimitWindow {
+    /// "5h", "24h", "3d", "Weekly" — what to call a window of this length.
+    /// Defaults to "5h" when a provider reports no span, which is what every
+    /// primary window was before Codex changed.
+    static func name(seconds: Double?) -> String {
+        guard let seconds, seconds > 0 else { return "5h" }
+        let hours = seconds / 3600
+        if hours >= 144 { return "Weekly" }
+        if hours >= 48 { return "\(Int((hours / 24).rounded()))d" }
+        if hours >= 1 { return "\(Int(hours.rounded()))h" }
+        return "\(Int((seconds / 60).rounded()))m"
+    }
+
+    /// Long enough to be a standing budget rather than a rolling session. Drives
+    /// the ring's lane order and the card's "what's blocking you" wording.
+    static func isWeekly(seconds: Double?) -> Bool { (seconds ?? 0) >= 48 * 3600 }
+}
+
 struct WeeklyMetric: Identifiable, Equatable, Codable {
     var label: String
     var pct: Double
     var resetText: String
+    /// When this window rolls over, for the card's "what's blocking you" line.
+    /// Optional: estimated metrics have no real reset, and cached readings written
+    /// before this field existed decode without it.
+    var resetAt: Date? = nil
+    /// Whether this is a rolling *weekly* cap. Codex and Kimi both report extra
+    /// short windows in this same list, so the card can't assume weekly.
+    /// nil ⇒ weekly, which every metric but those is.
+    var isWeeklyWindow: Bool? = nil
+
+    var isWeekly: Bool { isWeeklyWindow ?? true }
     var id: String { label }
 }
 
@@ -204,6 +279,9 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// True when the percentage is a local-token estimate rather than a
     /// provider-reported rate limit.
     var isEstimated: Bool
+    /// Span of the primary window `sessionPct` measures, when the provider reports
+    /// one. Not always 5h — see `LimitWindow`.
+    var sessionWindowSeconds: Double? = nil
     /// True when these are the last *real* API numbers, served because the live
     /// fetch failed transiently (e.g. HTTP 429). Real, just not fresh.
     var isStale: Bool = false
@@ -212,6 +290,11 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// data*. The card shows a "No data" state and the mascot goes `.dead`
     /// instead of inventing a "vs your busiest week" estimate that reads as real.
     var isUnavailable: Bool = false
+    /// True when the reader failed specifically because this provider's login
+    /// lapsed — as opposed to the server being unreachable or rate-limiting us,
+    /// where signing in again would change nothing. Only this state offers the
+    /// card's sign-in button.
+    var needsSignIn: Bool = false
     /// Optional note (e.g. why data is missing, or how fresh a cached reading is).
     var note: String?
     /// The provider's subscription tier (e.g. "Max (20x)", "Pro", "Team (5x)"),
@@ -243,6 +326,36 @@ struct ProviderSnapshot: Identifiable, Equatable {
         if isUnavailable { return 0 } // no data → no pressure (never the menu-bar peak)
         return isEstimated ? sessionPct : max(sessionPct, weekly.map(\.pct).max() ?? 0)
     }
+    /// What to call the primary window: "5h" for a rolling session, "Weekly" for a
+    /// provider like Codex whose primary limit spans 7 days.
+    var primaryWindowName: String { LimitWindow.name(seconds: sessionWindowSeconds) }
+
+    /// True when the primary window is short enough to be a "current session".
+    var hasSessionWindow: Bool { !LimitWindow.isWeekly(seconds: sessionWindowSeconds) }
+
+    /// The reported window closest to full, when it outranks the 5h session — the
+    /// limit that actually gates the next request, and so the one the ring
+    /// reports. nil for estimates: their weekly bars are "vs your busiest week"
+    /// ratios that trend to 100% by construction and must not headline the card.
+    var bindingLimit: WeeklyMetric? {
+        guard !isEstimated, !isUnavailable,
+              let worst = weekly.max(by: { $0.pct < $1.pct }),
+              worst.pct > sessionPct
+        else { return nil }
+        return worst
+    }
+
+    /// The limit that has actually run out, when one has. It owns the card's clock
+    /// line: an exhausted weekly cap blocks the next request however fresh the 5h
+    /// window is, and "No active session" there read as "go ahead".
+    ///
+    /// Exhausted, not merely red: at 94% weekly the provider still works, so the
+    /// line stays on the session countdown and the red ring carries the warning.
+    var blockingLimit: WeeklyMetric? {
+        guard let binding = bindingLimit, binding.pct >= Theme.exhaustedPct else { return nil }
+        return binding
+    }
+
     var mood: Mood {
         if isUnavailable { return .dead }
         if !isActive && !isEstimated && pressurePct < 5 { return .sleeping }
@@ -258,12 +371,16 @@ struct ProviderSnapshot: Identifiable, Equatable {
     }
 
     /// No usable data: the login lapsed and there's no fresh real reading to
-    /// show. Renders as a "No data" card with the `.dead` mascot.
-    static func unavailable(_ config: ProviderConfig, note: String? = nil) -> ProviderSnapshot {
+    /// show. Renders as a "No data" card with the `.dead` mascot. Pass
+    /// `needsSignIn` when the cause was the login itself, so the card can offer
+    /// to run the CLI's sign-in.
+    static func unavailable(
+        _ config: ProviderConfig, note: String? = nil, needsSignIn: Bool = false
+    ) -> ProviderSnapshot {
         ProviderSnapshot(
             config: config, sessionPct: 0, sessionResetAt: nil,
             weekly: [], isActive: false, isEstimated: false,
-            isUnavailable: true, note: note
+            isUnavailable: true, needsSignIn: needsSignIn, note: note
         )
     }
 
