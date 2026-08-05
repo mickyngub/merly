@@ -7,7 +7,7 @@ Native macOS menu bar app (Swift/AppKit + SwiftUI) showing AI agent quota usage 
 - `swift build` — debug build
 - `.build/debug/Merlyn --print` — headless snapshot of all readers (fast smoke test, no UI)
 - `.build/debug/Merlyn --open [--expand|--light|--rail]` — launch with QA flags (panel open / cards expanded / forced light theme / collapsed rail)
-- `.build/debug/Merlyn --mascot` — launch straight to the menu bar mascot editor (the topnav brush screen)
+- `.build/debug/Merlyn --mascot` — launch straight to the app-mascot editor (the Merlyn critter beside the panel title)
 - `scripts/bundle.sh` — release build + assemble `build/Merlyn.app`
 
 ## Architecture

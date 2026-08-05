@@ -14,12 +14,16 @@ ProviderCard
         └─ apiFirst(fetch:fallback:)
              ├─ try fetch()                  // real limits → isEstimated:false; cached as last-good
              ├─ catch → cached real reading  // < 6h old   → isStale:true  ("as of 12m ago")
-             └─ else  → local fallback       // estimate    → isEstimated:true  (≈ on ring)
+             └─ else  → fallback(error)
+                  ├─ failureSnapshot(error)  // typed failure → error card, NO estimate
+                  └─ else → local estimate   // isEstimated:true  (≈ on ring)
 ```
+
+**A failure is a reading, not a reason to guess.** `failureSnapshot(_:config:)` maps the fetch error onto a `ProviderFailure` — `.signedOut` (no creds / expired / 401), `.refused` (any other 4xx: a 403 from a lapsed or org-disabled subscription), `.rateLimited` (429, including a live cooldown), `.offline` (network / 5xx) — and the card renders that instead of numbers. Only an *unclassifiable* failure (schema drift, an unreadable response from a healthy account) is allowed to fall through to the estimate. Every reader calls this before its own fallback; the plan pill survives all four kinds because it comes from the keychain.
 
 **Why the cache tier matters.** The usage endpoints rate-limit (Anthropic's `/api/oauth/usage` will `429` under frequent polling). Without the cache, a single transient `429` would drop the card to local token estimation — and the estimate's "vs your busiest week" bars trend to ~100% by construction, which *looks like you're maxed out when you're not*. That was a real bug. Now a transient failure shows the last real numbers flagged stale; estimation only happens when there's no recent real reading at all (e.g. first run while offline).
 
-**429 cooldown.** A `429` sets a 5-minute per-provider cooldown (`ReaderContext.cooldownUntil`) so we stop hammering an endpoint that's already refusing us; during cooldown the reader serves cached/estimated data without calling the API.
+**429 cooldown.** A `429` sets a 5-minute per-provider cooldown (`ReaderContext.cooldownUntil`) so we stop hammering an endpoint that's already refusing us; during cooldown the reader serves the cached real reading without calling the API. With no cache left, the cooldown reports itself as `http(429)` to the fallback — never as a nil error, which used to be read as "no reason given" and papered over a standing rate limit with an estimate.
 
 **Estimates never alarm.** When `isEstimated`, the mascot mood uses the *session* figure only (not the self-referential weekly ratio), weekly bars render in the provider accent instead of escalating amber/red, and the ring shows `≈`. Estimated percentages are relative to the user's own busiest period, not a real quota — never present them as official.
 
@@ -116,14 +120,16 @@ The returned blob is JSON. Tokens may be nested under `claudeAiOauth` or flat:
     { "limit_name": "GPT-5.3-Codex-Spark", "metered_feature": "codex_bengalfox",
       "rate_limit": { "primary_window": {...}, "secondary_window": {...} } }
   ],
-  "credits": { "has_credits": false, "balance": "0", ... }
+  "credits": { "has_credits": false, "balance": "0", ... },
+  "rate_limit_reset_credits": { "available_count": 1, "applicable_available_count": 0 }
 }
 ```
 
-- `primary_window` (18000s = 5h) → session ring. `secondary_window` (604800s = weekly) → "Weekly" bar.
+- `primary_window` → the primary limit, **whatever its span**: as of Aug 2026 this account reports `limit_window_seconds: 604800` with `secondary_window: null`, i.e. the primary *is* the weekly budget. Never assume 5h from the field name (see `LimitWindow`).
 - `used_percent` is a plain number; `reset_at` is **epoch seconds** (not ISO). `parseAPIDate` handles both.
 - `additional_rate_limits[]` become extra weekly/5h bars labeled by `limit_name` (capped at 4 total).
-- `plan_type` → capitalized plan label ("Prolite").
+- `plan_type` → plan label via a lookup, not `.capitalized` ("prolite" is the rate-limited Pro tier → "Pro (5x)").
+- `rate_limit_reset_credits` → `ResetCredits`: one-shot grants that clear a rate-limit window early. `available_count` is what the account holds; `applicable_available_count` is what can be spent on the window currently blocking you — **they differ** (1 / 0 here), so the card's `↺ N` tag only lights up (green) when `applicable > 0`. A missing `applicable_available_count` is read as 0, never as "all of them".
 
 **Fallback** (offline/expired): Codex *also* writes `rate_limits` events into its rollout files at `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. `CodexReader.rolloutFallback` tail-reads the newest such event — same window shape, just stale. This is why Codex degrades more gracefully than Claude/Kimi.
 
@@ -174,6 +180,7 @@ Overridable like the CLI: `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST` (default `h
 
 - **All numeric values are strings** — parse with `flexDouble` (handles String/Int/Double).
 - `usage` = the weekly summary → "Weekly" bar. `limits[]` = shorter windows; `duration: 300 / TIME_UNIT_MINUTE` is the ~5h rate-limit window → session ring.
+- ⚠️ **`usage` states no window span** — unlike `limits[]`, which carries `duration` + `timeUnit`. "Weekly" is a *documented assumption* (7 × 86400 is passed in by `KimiReader`), which is why the menu bar tags it `wk` rather than claiming `7d`. Observed 2026-08-05 on a `LEVEL_BASIC` / `TYPE_PURCHASE` account: `usage: { limit: "100", used: "100", resetTime: <3 days out> }` with **no `remaining` key**, while `limits[0].detail` read `{ limit: "100", remaining: "100" }` — i.e. the rolling budget genuinely exhausted (100/100 used) while the 5h rate window was untouched. The two are independent; a maxed `usage` with a fresh `limits[0]` is a real state, not a parse error. Note it also makes that provider win the menu bar's "busiest" auto-pick for as long as it stays at 100%.
 - The CLI's parser is deliberately loose because field names drift across versions: `used` vs `remaining` (derive `used = limit - remaining`), `resetTime` vs `resetAt` vs `reset_at`. `KimiUsageAPI.window` mirrors that tolerance.
 - `membership.level` (`LEVEL_BASIC`) → plan label ("Basic").
 
