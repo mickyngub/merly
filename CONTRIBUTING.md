@@ -48,7 +48,7 @@ opening a PR.
 | `Sources/Merlyn/Mascot/` | Pixel-critter builder + sprite-sheet recoloring |
 | `Sources/Merlyn/Views/` | SwiftUI views (dock, cards, editor, settings) |
 | `Sources/Merlyn/Resources/` | Baked sprite sheets |
-| `scripts/` | Build/bundle/DMG + asset-generation scripts |
+| `scripts/` | `install.sh`, bundle/DMG + asset-generation scripts |
 | `docs/` | Provider-integration reference, provider API notes, specs |
 
 Read [`AGENTS.md`](AGENTS.md) for an architecture map and the load-bearing

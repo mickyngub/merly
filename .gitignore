@@ -5,7 +5,8 @@ dist/
 *.xcuserstate
 sprite-work/
 scripts/Merlyn.iconset/
-.claude/
+.claude/*
+!.claude/skills/
 .uv-cache/
 # notarization credentials — never commit
 .notary-credentials

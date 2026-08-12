@@ -26,16 +26,18 @@ Requires **macOS 14 (Sonoma) or newer** and a **Swift 5.9+ toolchain** (Xcode 15
 ```sh
 git clone https://github.com/mickyngub/merlyn.git
 cd merlyn
-scripts/bundle.sh                  # → build/Merlyn.app  (~40s)
-cp -R build/Merlyn.app /Applications/
-open /Applications/Merlyn.app
+scripts/install.sh
 ```
+
+`install.sh` checks your macOS and Swift versions, builds (~40s), quits any running copy, installs to `/Applications`, and launches. Re-run it any time to reinstall; `scripts/install.sh --update` pulls first. To do it by hand instead: `scripts/bundle.sh`, then `cp -R build/Merlyn.app /Applications/`.
 
 That's it — no Gatekeeper warning, because an app you compiled locally is never quarantined. Merlyn is a menu bar app with no Dock icon, so look up top.
 
+**Using Claude Code?** This repo ships an `install-merlyn` skill (`.claude/skills/`), so you can just ask it to install, update, or troubleshoot Merlyn and it'll know the flags, config paths, and the usual failure modes.
+
 On first launch it asks for **Keychain access** to read the Claude Code credentials — click **Always Allow**.
 
-> **Expect that Keychain prompt again after you rebuild.** macOS ties the grant to the app's exact code signature, and a locally built app is ad-hoc signed — every build is a new identity, so the prompt returns after `git pull && scripts/bundle.sh`. It's the cost of unsigned local builds, not a sign anything is wrong.
+> **Expect that Keychain prompt again after you rebuild.** macOS ties the grant to the app's exact code signature, and a locally built app is ad-hoc signed — every build is a new identity, so the prompt returns after `scripts/install.sh --update`. It's the cost of unsigned local builds, not a sign anything is wrong — [docs/specs/distribution.md](docs/specs/distribution.md) has a self-signed-certificate fix if it bothers you.
 
 ### Why no download
 
