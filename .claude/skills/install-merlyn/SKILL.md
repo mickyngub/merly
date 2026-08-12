@@ -45,6 +45,7 @@ Useful variants:
 | `scripts/install.sh ~/code/merlyn` | Use (or clone into) that directory |
 | `NO_INSTALL=1 scripts/install.sh` | Build only; don't touch `/Applications` |
 | `NO_LAUNCH=1 scripts/install.sh` | Install but don't open the app |
+| `MERLYN_REPO=<url> scripts/install.sh <dir>` | Clone from a fork or mirror instead |
 
 The script refuses to proceed on macOS 13 or older, or without a Swift 5.9+
 toolchain — both are hard requirements (`Package.swift` declares `.macOS(.v14)`;
