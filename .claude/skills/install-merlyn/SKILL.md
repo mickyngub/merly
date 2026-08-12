@@ -56,14 +56,20 @@ running Merlyn, then `cp -R build/Merlyn.app /Applications/`.
 
 ## Verify headlessly before touching the UI
 
-Run this **before** debugging anything visual:
+Run this **before** debugging anything visual. The installed app's own binary takes
+the flag, so this needs no extra build:
 
 ```sh
-.build/debug/Merlyn --print
+/Applications/Merlyn.app/Contents/MacOS/Merlyn --print
 ```
 
+(Working in a checkout instead? `swift build && .build/debug/Merlyn --print`. Note
+that `install.sh` builds *release* only, so `.build/debug/` won't exist until you run
+a plain `swift build`.)
+
 `--print` fetches every provider and dumps the readings to stdout with no UI at
-all, which separates the two failure classes that look identical from the menu bar:
+all — it's checked before `NSApplication` is even created, so nothing appears on
+screen. It separates the two failure classes that look identical from the menu bar:
 
 - **Numbers print** → auth, network and parsing all work. Anything still wrong is
   presentation — see "Nothing in the menu bar" below.
@@ -187,7 +193,9 @@ CLI's credentials.
 
 ## Reference
 
-QA flags on the debug binary (`.build/debug/Merlyn`):
+QA flags. These work on any build of the binary — the installed one
+(`/Applications/Merlyn.app/Contents/MacOS/Merlyn`) or a checkout's
+`.build/debug/Merlyn` after `swift build`:
 
 | Flag | Effect |
 |---|---|
