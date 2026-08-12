@@ -132,5 +132,6 @@ fi
 
 codesign --verify --strict "$APP"
 
-echo "Built: $APP  (v${VERSION} build ${BUILD})"
-echo "Run:   open \"$APP\""
+echo "Built:   $APP  (v${VERSION} build ${BUILD})"
+echo "Try it:  open \"$APP\"           (runs it from here, leaves /Applications alone)"
+echo "Install: scripts/install.sh    (quits any running copy, then installs it)"

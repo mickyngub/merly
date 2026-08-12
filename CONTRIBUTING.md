@@ -48,7 +48,7 @@ opening a PR.
 | `Sources/Merlyn/Mascot/` | Pixel-critter builder + sprite-sheet recoloring |
 | `Sources/Merlyn/Views/` | SwiftUI views (dock, cards, editor, settings) |
 | `Sources/Merlyn/Resources/` | Baked sprite sheets |
-| `scripts/` | `install.sh`, `bundle.sh`, asset-generation scripts |
+| `scripts/` | `bundle.sh` builds `build/Merlyn.app` (repo-only, what CI runs); `install.sh` wraps it and installs to `/Applications`; plus asset generation |
 | `docs/` | Provider-integration reference, provider API notes, specs |
 
 Read [`AGENTS.md`](AGENTS.md) for an architecture map and the load-bearing
