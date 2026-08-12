@@ -1,8 +1,8 @@
 # Merlyn
 
-[![CI](https://github.com/mickyngub/merlyn/actions/workflows/ci.yml/badge.svg)](https://github.com/mickyngub/merlyn/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)](#build-from-source)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)](#install)
+[![Build from source](https://img.shields.io/badge/install-build%20from%20source-orange)](#install)
 
 A native macOS menu bar app that tracks how much of your AI coding agent quota you've burned — across **Claude** (multiple accounts), **Codex**, **Kimi**, and any future provider you point at a config folder.
 
@@ -19,38 +19,38 @@ Each provider gets a cute 8-bit pixel critter whose **mood tracks your usage**: 
 
 ## Install
 
-Merlyn requires **macOS 14 (Sonoma) or newer**.
+**Merlyn is distributed as source you build yourself.** There are no prebuilt downloads — see [why](#why-no-download) below.
 
-Grab `Merlyn-<version>.dmg` from the [Releases](https://github.com/mickyngub/merlyn/releases) page, open it, and drag **Merlyn** to your Applications folder.
+Requires **macOS 14 (Sonoma) or newer** and a **Swift 5.9+ toolchain** (Xcode 15+, or just the Command Line Tools: `xcode-select --install`). No other dependencies.
 
-**First launch (unsigned builds).** Until a release is notarized by Apple, macOS Gatekeeper will block the first open. Do one of:
+```sh
+git clone https://github.com/mickyngub/merlyn.git
+cd merlyn
+scripts/bundle.sh                  # → build/Merlyn.app  (~40s)
+cp -R build/Merlyn.app /Applications/
+open /Applications/Merlyn.app
+```
 
-- **System Settings** → **Privacy & Security** → scroll to the message about *Merlyn* → **Open Anyway**, then confirm. Or,
-- In Terminal, clear the quarantine flag, then open normally:
+That's it — no Gatekeeper warning, because an app you compiled locally is never quarantined. Merlyn is a menu bar app with no Dock icon, so look up top.
 
-  ```sh
-  xattr -dr com.apple.quarantine /Applications/Merlyn.app
-  open /Applications/Merlyn.app
-  ```
+On first launch it asks for **Keychain access** to read the Claude Code credentials — click **Always Allow**.
 
-You only need to do this once. Notarized releases open with a normal double-click and no warning.
+> **Expect that Keychain prompt again after you rebuild.** macOS ties the grant to the app's exact code signature, and a locally built app is ad-hoc signed — every build is a new identity, so the prompt returns after `git pull && scripts/bundle.sh`. It's the cost of unsigned local builds, not a sign anything is wrong.
 
-On first run, Merlyn asks for **Keychain access** to read the Claude Code credentials — click **Always Allow**.
+### Why no download
 
-## Build from source
+A signed, notarized app needs an Apple Developer Program membership ($99/yr). Without one, any DMG would land quarantined and every user would have to click past *"macOS cannot verify this app is free of malware"* — for a tool that reads your credential tokens, that is exactly the wrong thing to train people to do. Building from source is both friction-free and the honest option: you can read what you're running. If that changes, this section changes with it.
 
-No dependencies; just a Swift toolchain.
+## Development
 
 ```sh
 swift build
-.build/debug/Merlyn --print     # headless data check (no UI)
+.build/debug/Merlyn --print     # headless snapshot of all readers (no UI)
 .build/debug/Merlyn --open      # run with the panel open
-
-scripts/bundle.sh               # → build/Merlyn.app
-scripts/dmg.sh                  # → dist/Merlyn-<version>.dmg
+.build/debug/Merlyn --mascot    # jump to the mascot editor
 ```
 
-Requires macOS 14+ and a Swift 5.9+ toolchain. See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev loop and [docs/specs/distribution.md](docs/specs/distribution.md) for signing/notarization.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev loop and [docs/specs/distribution.md](docs/specs/distribution.md) for how the app bundle is assembled and signed.
 
 ## Where the numbers come from
 

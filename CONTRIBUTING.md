@@ -49,7 +49,7 @@ opening a PR.
 | `Sources/Merlyn/Views/` | SwiftUI views (dock, cards, editor, settings) |
 | `Sources/Merlyn/Resources/` | Baked sprite sheets |
 | `scripts/` | Build/bundle/DMG + asset-generation scripts |
-| `docs/` | Provider-integration reference, decision log, specs |
+| `docs/` | Provider-integration reference, provider API notes, specs |
 
 Read [`AGENTS.md`](AGENTS.md) for an architecture map and the load-bearing
 footguns (Keychain signing, Kimi token rotation, off-main-thread readers).
@@ -87,11 +87,15 @@ Before opening a PR, please make sure:
       credentials — never hardcode or log any).
 - [ ] File I/O and HTTP stay **off** the main thread (readers run on
       `UsageEngine.workQueue`).
-- [ ] Docs/decision logs updated if you changed provider integration behavior.
+- [ ] `docs/provider-integration.md` updated if you changed provider integration behavior.
 
 Keep PRs focused. Describe what changed and how you verified it.
 
 ## Releasing (maintainers)
 
-Signing, notarization, and DMG packaging are documented in
-[`docs/specs/distribution.md`](docs/specs/distribution.md).
+Merlyn ships as source; there are no release artifacts to publish. How the app
+bundle is assembled and ad-hoc signed — and what changing that would take — is
+documented in [`docs/specs/distribution.md`](docs/specs/distribution.md).
+
+CI (`.github/workflows/ci.yml`) is manual-only: `gh workflow run ci.yml`, or the
+Actions tab. Run it when you want proof a clean machine can build the app.

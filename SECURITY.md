@@ -53,11 +53,19 @@ credential file, which the CLI protocol requires us to update in place), and
 
 ## Distribution & code signing
 
-Release builds are intended to be signed with an Apple Developer ID certificate
-and notarized by Apple. An unsigned build (e.g. one you compiled yourself) will
-be gated by Gatekeeper on first launch — see the README for how to open it, and
-`docs/specs/distribution.md` for the signing/notarization pipeline. Verify any
-`.dmg` you receive came from a source you trust.
+Merlyn is distributed **as source only** — there is no signed, notarized build and
+no official download. Notarization requires a paid Apple Developer Program
+membership, and an unsigned download would force every user to click past
+Gatekeeper's "cannot verify this app is free of malware" warning. For a tool that
+reads credential tokens, that is the wrong habit to teach.
+
+Build it yourself (see the README). A locally compiled app is never quarantined, so
+Gatekeeper does not gate it at all. The bundle is ad-hoc signed because Apple
+Silicon will not execute an unsigned binary; one consequence is that each rebuild is
+a new code identity, so macOS re-asks for Keychain access after every build.
+
+**Treat any `Merlyn.dmg` or prebuilt `Merlyn.app` offered to you as untrusted** — we
+publish neither. See [`docs/specs/distribution.md`](docs/specs/distribution.md).
 
 ## Reporting a vulnerability
 

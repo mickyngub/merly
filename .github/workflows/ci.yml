@@ -1,9 +1,12 @@
 name: CI
 
+# Manual only — run it from the Actions tab, or `gh workflow run ci.yml`.
+# Deliberately not on push/pull_request: this repo is distributed as source that
+# every user builds themselves, so a green run here proves nothing a contributor's
+# own `swift build` doesn't already tell them. It stays available for checking a
+# clean-machine build before announcing a change.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
