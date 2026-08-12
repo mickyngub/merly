@@ -214,6 +214,6 @@ Paths:
 - Build output: `build/Merlyn.app` in the checkout
 - Bundle id: `sh.micky.merlyn` — keep it stable; the Keychain grant is tied to it
 
-Deeper detail: [docs/specs/distribution.md](../../../docs/specs/distribution.md) for
-signing, [docs/provider-integration.md](../../../docs/provider-integration.md) for
+Deeper detail: [docs/specs/distribution.md](../../docs/specs/distribution.md) for
+signing, [docs/provider-integration.md](../../docs/provider-integration.md) for
 auth flows and endpoints.

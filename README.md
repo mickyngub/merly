@@ -33,7 +33,13 @@ scripts/install.sh
 
 That's it — no Gatekeeper warning, because an app you compiled locally is never quarantined. Merlyn is a menu bar app with no Dock icon, so look up top.
 
-**Using Claude Code?** This repo ships an `install-merlyn` skill (`.claude/skills/`), so you can just ask it to install, update, or troubleshoot Merlyn and it'll know the flags, config paths, and the usual failure modes.
+**Using an AI coding agent?** This repo ships an `install-merlyn` [agent skill](skills/install-merlyn/SKILL.md). Install it into Claude Code, Codex, or any agent the [skills CLI](https://github.com/vercel-labs/skills) supports:
+
+```sh
+npx skills add mickyngub/merlyn
+```
+
+Then just ask your agent to install, update, or troubleshoot Merlyn — it'll know the flags, config paths, and the usual failure modes.
 
 On first launch it asks for **Keychain access** to read the Claude Code credentials — click **Always Allow**.
 

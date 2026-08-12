@@ -49,6 +49,7 @@ opening a PR.
 | `Sources/Merlyn/Views/` | SwiftUI views (dock, cards, editor, settings) |
 | `Sources/Merlyn/Resources/` | Baked sprite sheets |
 | `scripts/` | `bundle.sh` builds `build/Merlyn.app` (repo-only, what CI runs); `install.sh` wraps it and installs to `/Applications`; plus asset generation |
+| `skills/` | Agent skills published for `npx skills add mickyngub/merlyn` |
 | `docs/` | Provider-integration reference, provider API notes, specs |
 
 Read [`AGENTS.md`](AGENTS.md) for an architecture map and the load-bearing
