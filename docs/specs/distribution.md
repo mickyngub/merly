@@ -103,25 +103,36 @@ run on every push proves nothing their own `swift build` doesn't.
 | `SIGN_IDENTITY` | auto-detected | Force a specific codesign identity |
 | `MERLYN_ADHOC` | `0` | `1` = force ad-hoc signing even if a Developer ID exists |
 
-`scripts/dmg.sh` still exists and still works (including its `NOTARIZE=1` path) for
-building a local disk image, but no DMG is published.
+`scripts/install.sh` adds `NO_INSTALL`, `NO_LAUNCH` and `MERLYN_REPO`.
+
+## There is no packaging script
+
+`scripts/dmg.sh` was removed once source-only became
+the decided channel — keeping it implied a distribution path this project doesn't
+use. It stays in git history if it's ever wanted back:
+
+```sh
+git log --diff-filter=D --format='%h %s' -- scripts/dmg.sh   # the deleting commit
+git show <commit>^:scripts/dmg.sh > scripts/dmg.sh           # restore it
+```
 
 ## If the channel ever changes
 
 Going notarized needs, in order: enroll in the Developer Program and note the Team
 ID; create a *Developer ID Application* certificate (Xcode → Settings → Accounts →
 Manage Certificates); create an app-specific password at appleid.apple.com; store
-notary credentials once with `xcrun notarytool store-credentials merlyn-notary`;
-then `NOTARIZE=1 scripts/dmg.sh`. `bundle.sh` picks the Developer ID up
-automatically and switches on Hardened Runtime, which notarization requires. The
-entitlements dict is intentionally empty — no exceptions are needed, since Keychain
-reads shell out to `/usr/bin/security` rather than using in-process APIs.
+notary credentials once with `xcrun notarytool store-credentials merlyn-notary`; and
+restore a packaging script (see above). `bundle.sh` itself needs no changes — it
+already picks a Developer ID up automatically and switches on Hardened Runtime,
+which notarization requires. The entitlements dict is intentionally empty; no
+exceptions are needed, since Keychain reads shell out to `/usr/bin/security` rather
+than using in-process APIs.
 
 ## Footguns
 
 - **Keep the bundle id `sh.micky.merlyn` stable.** The Keychain grant for Claude
   credentials is tied to the app's signature and identity.
-- Notarization requires network, Hardened Runtime, and **no** `get-task-allow`
-  entitlement (release signing omits it automatically).
-- If `notarytool submit` ever reports `Invalid`, fetch the log with
-  `xcrun notarytool log <submission-id> --keychain-profile merlyn-notary`.
+- Should notarization ever come back: it needs network, Hardened Runtime, and **no**
+  `get-task-allow` entitlement (release signing omits it automatically). If
+  `notarytool submit` reports `Invalid`, fetch the log with `xcrun notarytool log
+  <submission-id> --keychain-profile merlyn-notary`.

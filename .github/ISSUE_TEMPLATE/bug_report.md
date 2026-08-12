@@ -18,7 +18,7 @@ What you expected to happen instead.
 
 **Environment**
 - macOS version:
-- Merlyn version (menu bar → About, or the DMG filename):
+- Merlyn commit (`git -C <your checkout> rev-parse --short HEAD`):
 - Affected provider(s): Claude / Codex / Kimi / other
 - Was the card showing real data or an estimate (a `≈` on the ring)?
 

@@ -3,10 +3,11 @@
 #
 # Signing is automatic and optional:
 #   • If a "Developer ID Application" certificate is in your keychain, the app
-#     is signed with it + Hardened Runtime (--options runtime), ready to be
-#     notarized by scripts/dmg.sh.
-#   • Otherwise it is ad-hoc signed — runs locally, but Gatekeeper will warn
-#     when the app is downloaded or sent to someone else.
+#     is signed with it + Hardened Runtime (--options runtime) — what
+#     notarization would need, if this project ever shipped binaries.
+#   • Otherwise it is ad-hoc signed, which is the normal path: Merlyn ships as
+#     source, and an app built locally is never quarantined. Only a copy you
+#     *download* hits Gatekeeper, and we publish none.
 #
 # Overrides (env):
 #   MERLYN_VERSION=1.2   marketing version (CFBundleShortVersionString)
@@ -115,7 +116,8 @@ if [ -n "$IDENTITY" ]; then
   codesign --force --options runtime --timestamp \
     --entitlements "$ENTITLEMENTS" \
     --sign "$IDENTITY" "$APP"
-  echo "✔ Signed. Next: scripts/dmg.sh notarizes + packages (see docs/specs/distribution.md)."
+  echo "✔ Signed with a real identity. Merlyn ships as source, so there is nothing"
+  echo "  further to package — see docs/specs/distribution.md."
 else
   echo "▶ No Developer ID identity found — ad-hoc signing. This is the normal path:"
   echo "  Merlyn ships as source, and an app you built locally is never quarantined,"
