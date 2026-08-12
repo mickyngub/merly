@@ -11,3 +11,6 @@ scripts/Merlyn.iconset/
 .notary-credentials
 *.p12
 *.p8
+
+# private decision backbone — kept locally, never published
+docs/decisions/

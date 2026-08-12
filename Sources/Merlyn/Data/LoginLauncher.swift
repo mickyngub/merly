@@ -2,7 +2,7 @@
 // an expired login can be fixed from the panel instead of hunting down the agent.
 //
 // Merlyn deliberately does not authenticate on the provider's behalf: it never
-// mints or refreshes a token (see docs/decisions/usage-readers). This only shells
+// mints or refreshes a token (see docs/provider-integration.md). This only shells
 // out to the CLI's documented login command — `claude auth login`, `codex login`,
 // `kimi login` — which then owns the credentials as usual.
 

@@ -30,7 +30,7 @@ enum ProviderKind: String, Codable, CaseIterable {
     /// The CLI subcommand that starts this kind's own sign-in flow.
     ///
     /// Merlyn never mints or refreshes a token itself — see the never-refresh rule
-    /// in `docs/decisions/usage-readers`. The sign-in button runs the CLI's login
+    /// in `docs/provider-integration.md`. The sign-in button runs the CLI's login
     /// in a terminal and lets it own the credentials, exactly as if the user had
     /// opened the agent and typed this.
     var loginCommand: String {
@@ -98,7 +98,7 @@ enum ProviderKind: String, Codable, CaseIterable {
 /// The app's own mascot, shown beside the panel's "Merlyn" title. Independent of
 /// any provider; its look is user-editable while its mood tracks the busiest
 /// provider's pressure. (The menu bar always wears the *reported provider's*
-/// critter instead — see `docs/decisions/menu-bar`.)
+/// critter instead, so a reading always has a visible subject.)
 struct DefaultMascot: Codable, Equatable {
     var style: MascotStyle
     /// User-chosen index into the fated deck (see `Fate`). The deck's *hues* are
