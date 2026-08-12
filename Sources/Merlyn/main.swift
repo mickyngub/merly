@@ -79,15 +79,18 @@ func printSnapshots() {
         for metric in snap.weekly {
             print("   \(metric.label): \(Int(metric.pct.rounded()))% used · \(metric.resetText)")
         }
-        // Ring lanes outermost-first, and the one figure the menu bar reports —
-        // both derived, so printing them is how they're checked without a screenshot.
+        // Ring lanes outermost-first, and the menu bar's gauge lanes — both derived,
+        // so printing them is how they're checked without a screenshot. The lane
+        // *count* matters as much as the figures: a provider with one limit must
+        // print one bar, never a padded pair.
         let lanes = snap.ringWindows(maxLanes: 3)
             .map { "\($0.label) \(Int($0.pct.rounded()))%" }
             .joined(separator: " → ")
         if !lanes.isEmpty { print("   ring (rim → centre): \(lanes)") }
-        if let gauge = snap.bindingGauge {
-            print("   menu bar: \(gauge.estimated ? "≈" : "")\(gauge.window) \(Int(gauge.pct.rounded()))%")
-        }
+        let bars = snap.iconGauges
+            .map { "\($0.estimated ? "≈" : "")\($0.window) \(Int($0.pct.rounded()))%" }
+            .joined(separator: " / ")
+        if !bars.isEmpty { print("   menu bar (top → bottom): \(bars)") }
         if let g = snap.game {
             let mb = Double(g.lifetimeBytes) / 1_048_576
             print("   game: Lv \(g.level) (\(Int((g.xpInLevel * 100).rounded()))% to next) · form \(g.form) · 🔥\(g.streakDays) · \(String(format: "%.0f", mb)) MB lifetime")

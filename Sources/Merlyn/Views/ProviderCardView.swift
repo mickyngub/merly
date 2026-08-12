@@ -20,34 +20,29 @@ struct ProviderCardView: View {
     private var accent: Color { snapshot.config.resolvedPalette.accent }
 
     /// Ring lanes, outermost first — the order comes from the snapshot (see
-    /// `ringWindows`); the card only supplies the colours, since only it knows the
-    /// provider's palette.
+    /// `ringWindows`); the card only supplies the colours.
     private var ringLimits: [RingLimit] {
-        let baseHue = Fate.hue(slot: snapshot.config.resolvedColorSlot,
-                               shiny: snapshot.config.isShiny)
-        return snapshot.ringWindows(maxLanes: RingView.maxLanes).enumerated().map { index, window in
+        snapshot.ringWindows(maxLanes: RingView.maxLanes).map { window in
             RingLimit(id: window.label, pct: window.pct,
-                      color: laneColor(pct: window.pct, index: index, baseHue: baseHue))
+                      color: laneColor(label: window.label, pct: window.pct))
         }
     }
 
-    /// Lane hue identifies the *window*, stepped 55° off the provider's own hue so
-    /// the lanes are tellable apart while the ring still reads as this provider's.
+    /// Lane colour identifies the *limit*: the provider kind's band, stepped by the
+    /// limit's category (see `ProviderKind.limitColorHex` / `ProviderSnapshot.laneRank`).
+    /// So a 5h session is the same colour on every Claude card and the week is the
+    /// same colour on both — the two cards are comparable at a glance, which is the
+    /// whole point of having them stacked. The account's own hue stays on its mascot.
     ///
-    /// Severity keeps exactly one override: a lane at or past the danger threshold
-    /// goes red. Being about to get blocked is the one thing worth breaking the
-    /// colour scheme for — the amber warn band stays on the bars, which have labels.
-    private func laneColor(pct: Double, index: Int, baseHue: Double) -> Color {
-        guard pct < Theme.dangerPct else { return Theme.danger }
-        return MascotPalette.fromHue(baseHue + Double(index) * 55).accent
-    }
-
-    /// The colour a window's bar shares with its ring lane, matched on label. Ties
-    /// the two views together: the arc and the bar are the same limit, so reading
-    /// them as one object is the whole point of colouring lanes by category.
-    private func laneColor(matching label: String) -> Color {
-        ringLimits.first { $0.id == label }?.color
-            ?? Theme.usageColor(pct: 0, accent: accent)
+    /// Severity keeps exactly one override, and it lives in `Theme.limitColor` so
+    /// the rail and the menu bar escalate at the same point: at or past the danger
+    /// threshold a limit goes red, and nothing else recolours it.
+    ///
+    /// Bars call this too, so the arc and the bar read as one limit — including for a
+    /// window the ring had to truncate, which used to fall back to the plain accent.
+    private func laneColor(label: String, pct: Double) -> Color {
+        let lane = Color(hex: snapshot.config.kind.limitColorHex(rank: snapshot.laneRank(of: label)))
+        return Theme.limitColor(pct: pct, lane: lane)
     }
 
     var body: some View {
@@ -142,14 +137,20 @@ struct ProviderCardView: View {
                         .foregroundStyle(theme.text)
                         .lineLimit(1)
                         .layoutPriority(1)
-                    Text(snapshot.config.account)
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(0.2)
-                        .foregroundStyle(theme.text2)
-                        .lineLimit(1)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1.5)
-                        .background(theme.chip, in: RoundedRectangle(cornerRadius: 6))
+                    // Blank accounts are legal in providers.json (a lone provider of
+                    // its kind needs no disambiguator), and an empty Text still
+                    // draws its padding + chip background — a bare pill with
+                    // nothing in it. Drop the chip entirely instead.
+                    if !snapshot.config.account.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Text(snapshot.config.account)
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(0.2)
+                            .foregroundStyle(theme.text2)
+                            .lineLimit(1)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(theme.chip, in: RoundedRectangle(cornerRadius: 6))
+                    }
                     Spacer(minLength: 0)
                 }
                 resetLine
@@ -313,7 +314,7 @@ struct ProviderCardView: View {
                 caption: snapshot.sessionResetAt.map {
                     "\(snapshot.primaryWindowName) limit · resets in \(Self.duration(until: $0, now: context.date))"
                 } ?? "\(snapshot.primaryWindowName) limit · no active session",
-                color: laneColor(matching: snapshot.primaryWindowName)
+                color: laneColor(label: snapshot.primaryWindowName, pct: snapshot.sessionPct)
             )
         }
 
@@ -331,7 +332,7 @@ struct ProviderCardView: View {
         ForEach(snapshot.weekly) { metric in
             UsageBar(
                 label: metric.label, pct: metric.pct, caption: metric.resetText,
-                color: laneColor(matching: metric.label)
+                color: laneColor(label: metric.label, pct: metric.pct)
             )
         }
     }

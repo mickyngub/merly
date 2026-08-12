@@ -299,15 +299,33 @@ struct RailView: View {
     static let mascotPx: CGFloat = 28
     static let spacing: CGFloat = 13
     static let chevronHeight: CGFloat = 16
+    /// One gauge lane under each mascot, the space above the first, and the gap
+    /// between lanes — the menu bar item's proportions scaled up to the rail's
+    /// larger mascot.
+    static let gaugeHeight: CGFloat = 4
+    static let gaugeGap: CGFloat = 4
+    static let laneGap: CGFloat = 2
+    /// Lanes reserved per provider: the 5h window and the weekly cap (see
+    /// `ProviderSnapshot.iconGauges`).
+    static let laneCount = 2
     /// Padding above the chevron and below the last mascot. Kept >= the panel's
     /// corner radius so a hover-scaled bottom mascot never clips on the corner.
     static let vPadding: CGFloat = 16
+
+    /// One provider's slot: mascot plus both gauge lanes under it. Both rows are
+    /// reserved even for a provider that draws one bar or none, so a single-limit
+    /// provider — or one dropping out entirely — doesn't reflow the rail or shift
+    /// the mascots' rhythm.
+    static var itemHeight: CGFloat {
+        mascotPx + gaugeGap + CGFloat(laneCount) * gaugeHeight
+            + CGFloat(laneCount - 1) * laneGap
+    }
 
     /// Natural height for `count` providers — the rail panel is sized to this so
     /// it stops at the last mascot instead of filling the screen.
     static func contentHeight(providerCount count: Int) -> CGFloat {
         let items = count + 1 // chevron + one mascot per provider
-        let itemsHeight = chevronHeight + CGFloat(count) * mascotPx
+        let itemsHeight = chevronHeight + CGFloat(count) * itemHeight
         let gaps = CGFloat(max(items - 1, 0)) * spacing
         return vPadding * 2 + itemsHeight + gaps
     }
@@ -319,18 +337,7 @@ struct RailView: View {
                 .foregroundStyle(theme.text2)
                 .frame(height: Self.chevronHeight)
             ForEach(engine.snapshots) { snapshot in
-                MascotView(
-                    style: snapshot.config.resolvedStyle,
-                    palette: snapshot.config.resolvedPalette,
-                    mood: snapshot.mood,
-                    px: Self.mascotPx,
-                    bob: false,
-                    hopsOnHover: false,
-                    spriteName: snapshot.config.resolvedSprite
-                )
-                .frame(width: Self.mascotPx, height: Self.mascotPx)
-                .scaleEffect(hovering ? 1.08 : 1)
-                .animation(.easeOut(duration: 0.2), value: hovering)
+                item(snapshot)
             }
         }
         .padding(.vertical, Self.vPadding)
@@ -339,6 +346,104 @@ struct RailView: View {
         .onTapGesture(perform: onExpand)
         .onHover { hovering = $0 }
         .help("Open usage")
+    }
+
+    /// One rail entry: the mascot with its gauge lanes tucked underneath, the same
+    /// reading the menu bar carries — but for every provider at once.
+    ///
+    /// Collapsed used to be mascots only, which shows the *mood* but not the
+    /// number, so "how close am I to being blocked" still meant expanding the
+    /// panel. The mood face and the bar answer different questions and the rail is
+    /// where you want the second one without opening anything.
+    private func item(_ snapshot: ProviderSnapshot) -> some View {
+        VStack(spacing: Self.gaugeGap) {
+            MascotView(
+                style: snapshot.config.resolvedStyle,
+                palette: snapshot.config.resolvedPalette,
+                mood: snapshot.mood,
+                px: Self.mascotPx,
+                bob: false,
+                hopsOnHover: false,
+                spriteName: snapshot.config.resolvedSprite
+            )
+            .frame(width: Self.mascotPx, height: Self.mascotPx)
+            .overlay(alignment: .bottomTrailing) {
+                if let failure = snapshot.failure {
+                    RailFailureBadge(failure: failure).offset(x: 3, y: 1)
+                }
+            }
+            gauge(snapshot)
+        }
+        .scaleEffect(hovering ? 1.08 : 1)
+        .animation(.easeOut(duration: 0.2), value: hovering)
+        .help(snapshot.gaugeTooltip())
+    }
+
+    /// The 5h window and the weekly cap as two bars the mascot's width, nearest lane
+    /// first, each filled left to right with the same warn/danger escalation as every
+    /// bar in the panel. Both slots are always laid out — a provider with one limit
+    /// leaves the outer one empty rather than sliding its bar up, so a lane means the
+    /// same window down the whole rail.
+    ///
+    /// **A failure draws no bar at all** — not an empty track, not a dash in it.
+    /// Anything gauge-shaped is read as a level, so a disconnected provider would
+    /// show what looks like a measurement of nothing; it gets a badge on its
+    /// shoulder instead, which is unmistakably a state and not a quantity. Same
+    /// reasoning as the menu bar item.
+    private func gauge(_ snapshot: ProviderSnapshot) -> some View {
+        let lanes = snapshot.iconGauges
+        return VStack(spacing: Self.laneGap) {
+            ForEach(0..<Self.laneCount, id: \.self) { index in
+                if index < lanes.count {
+                    lane(lanes[index])
+                } else {
+                    Color.clear.frame(width: Self.mascotPx, height: Self.gaugeHeight)
+                }
+            }
+        }
+    }
+
+    private func lane(_ reading: IconGauge) -> some View {
+        // The colour of the limit being reported, not of this account: the same
+        // window wears the same hue on the card, in the menu bar, and here.
+        let laneColor = Color(hex: reading.colorHex)
+        let fraction = min(max(reading.pct / 100, 0), 1)
+        return Capsule()
+            // A tint of that limit's own colour rather than a neutral track,
+            // matching the menu bar and the ring lanes: bar and mascot read as
+            // one object that way.
+            .fill(laneColor.opacity(0.30))
+            .frame(width: Self.mascotPx, height: Self.gaugeHeight)
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(Theme.limitColor(pct: reading.pct, lane: laneColor))
+                    // Never narrower than the bar is tall, so a live 1% still
+                    // reads as a fill and not a rendering artefact.
+                    .frame(width: max(Self.gaugeHeight, Self.mascotPx * fraction))
+                    .opacity(fraction > 0 ? 1 : 0)
+            }
+            .animation(Theme.snappy(0.55), value: fraction)
+    }
+}
+
+/// A failing provider's shoulder badge — what the rail shows in place of the gauge
+/// it must not draw. One glyph for every failure kind, hand-picked over
+/// `failure.symbol` because those (`person.badge.key`, `bolt.slash.fill`) are mush
+/// at 12pt; the tint separates a broken account from a bad minute, and the tooltip
+/// names it exactly.
+private struct RailFailureBadge: View {
+    let failure: ProviderFailure
+
+    var body: some View {
+        let tint = failure.isFault ? Theme.danger : Theme.warn
+        return Image(systemName: "exclamationmark")
+            .font(.system(size: 8, weight: .black))
+            .foregroundStyle(.white)
+            .frame(width: 12, height: 12)
+            .background(tint, in: Circle())
+            // Lifts the badge off the sprite it overlaps, the same trick the ring
+            // lanes use — without it the dot merges into a dark critter.
+            .shadow(color: .black.opacity(0.45), radius: 1.5)
     }
 }
 

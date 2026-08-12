@@ -48,8 +48,8 @@ struct Theme {
         scheme == .dark ? .dark : .light
     }
 
-    /// Ring/bar warning escalation from the prototype: amber at 66%, red at 88%.
-    static let warnPct: Double = 66
+    /// Where a limit turns red — the one severity escalation any gauge applies
+    /// (`limitColor`). There is no amber band: see `limitColor` for why.
     static let dangerPct: Double = 88
 
     /// Where a limit stops being "nearly out" and starts actually blocking work.
@@ -59,12 +59,47 @@ struct Theme {
     static let exhaustedPct: Double = 99.5
 
     static let danger = Color(hex: 0xE5484D)
+    /// Amber. Not a usage band — it tints the failure badges, where it means "this
+    /// fixes itself" as against `danger`'s "this account is broken".
     static let warn = Color(hex: 0xE8A33D)
 
-    static func usageColor(pct: Double, accent: Color) -> Color {
-        if pct >= dangerPct { return danger }
-        if pct >= warnPct { return warn }
-        return accent
+    /// The colour a limit is drawn in: its own lane colour (see
+    /// `ProviderKind.limitColorHex`), red once it's close to blocking.
+    ///
+    /// **The one escalation every surface uses** — ring lane, card bar, rail gauge,
+    /// menu bar gauge. It deliberately skips the amber warn band: amber is a *third*
+    /// meaning laid over a scale where colour already means "which limit", so a 70%
+    /// week went amber in the menu bar while the card drew it in its own hue, and the
+    /// two surfaces disagreed about the same reading. Only `dangerPct` earns the
+    /// override — being about to get blocked is worth breaking the scheme for.
+    static func limitColor(pct: Double, lane: Color) -> Color {
+        pct >= dangerPct ? danger : lane
+    }
+
+    /// Whether near-black ink reads better than white on this colour. Weighted
+    /// luminance, not a plain channel average: the eye reads green far brighter than
+    /// blue, and an unweighted test put white on Claude's yellow lane and black on
+    /// Kimi's violet — both unreadable.
+    ///
+    /// Needed because the lane band spans both answers by design: `limitColorHex` is
+    /// HSL(hue, 0.62, 0.62±), so hue alone decides, and anything writing *on* a lane
+    /// colour has to ask rather than assume. Lives beside `limitColor` because it's
+    /// the same kind of rule — how a limit's colour is used, not where.
+    static func prefersDarkInk(on hex: UInt32) -> Bool {
+        let r = Double((hex >> 16) & 0xFF) / 255
+        let g = Double((hex >> 8) & 0xFF) / 255
+        let b = Double(hex & 0xFF) / 255
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55
+    }
+
+    /// `hex` blended toward white or black by `amount` (0…1), keeping its hue.
+    static func blend(_ hex: UInt32, towardWhite: Bool, amount: Double) -> UInt32 {
+        let target = towardWhite ? 255.0 : 0.0
+        func mix(_ shift: UInt32) -> UInt32 {
+            let channel = Double((hex >> shift) & 0xFF)
+            return UInt32((channel + (target - channel) * amount).rounded())
+        }
+        return mix(16) << 16 | mix(8) << 8 | mix(0)
     }
 
     /// The 0.32,0.72,0,1 curve used for nearly every transition in the prototype.

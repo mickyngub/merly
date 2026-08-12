@@ -62,6 +62,37 @@ enum ProviderKind: String, Codable, CaseIterable {
         case .kimi: [("kimi-sprite", "Kimi")]
         }
     }
+
+    /// Where this kind's limit colours start on the wheel — see `limitColorHex`. The
+    /// kinds sit ~100° apart, wide enough that no Claude lane can be mistaken for a
+    /// Codex one, and the run avoids the two hues severity owns: `Theme.danger`
+    /// (~358°) and `Theme.warn` (~40°) must never be something a healthy limit wears.
+    var limitBaseHue: Double {
+        switch self {
+        case .claude: 60    // yellow → lime → green
+        case .codex: 190    // cyan → blue → indigo
+        case .kimi: 290     // violet → magenta → pink
+        }
+    }
+
+    /// The colour a limit lane wears, packed 0xRRGGBB: this kind's band, stepped by
+    /// the limit's category rank (see `ProviderSnapshot.laneRank`). Hex rather than
+    /// `Color` because the menu bar gauge draws in AppKit.
+    ///
+    /// Keyed on the *kind*, never on the account's mascot palette: two Claude cards
+    /// stack in one panel, and a colour that meant "5h" on one and "weekly" on the
+    /// next made the panel unreadable. Account identity stays with the mascot.
+    ///
+    /// Each step moves hue *and* lightness. Hue alone doesn't separate lanes — 25°
+    /// apart in the greens gave "All models" and "Fable only" two near-identical
+    /// bars — and hue steps wide enough to fix that would walk out of the kind's
+    /// band. Alternating light/dark makes neighbouring lanes differ in value, which
+    /// survives a 6pt bar and a 3pt menu bar gauge.
+    func limitColorHex(rank: Int) -> UInt32 {
+        let hue = limitBaseHue + Double(rank) * 25
+        let light = rank == 0 ? 0 : (rank.isMultiple(of: 2) ? -0.15 : 0.14)
+        return MascotPalette.fromHue(hue, lightBoost: light).B
+    }
 }
 
 /// The app's own mascot, shown beside the panel's "Merlyn" title. Independent of
@@ -334,6 +365,29 @@ struct WeeklyMetric: Identifiable, Equatable, Codable {
     var id: String { label }
 }
 
+/// One bar in an icon-sized gauge — the menu bar item and the collapsed rail. Not
+/// a `WeeklyMetric`: those are the provider's reported rows, this is a reading
+/// already resolved down to what a 2–3pt bar can carry (which window, how full,
+/// whether it's a guess, what colour the card gives it).
+struct IconGauge: Equatable {
+    /// "5h" / "24h" / "wk" — the window this bar measures.
+    var window: String
+    var pct: Double
+    /// A local-token estimate rather than a reported limit. The bar can't say so at
+    /// this size, so the tooltip does — see `gaugeTooltip`.
+    var estimated: Bool
+    /// The colour the card gives this same limit (`ProviderKind.limitColorHex`), so
+    /// the same window is the same hue in the ring, the rail, and the menu bar.
+    var colorHex: UInt32
+
+    /// The chip text drawn beside the bar: "5h", "24h", "w". Colour alone couldn't
+    /// say which bar was which — two lanes of the same provider's band are a hue
+    /// apart, which distinguishes them from each other but doesn't *name* either.
+    /// Single-letter for weekly because the chip has ~11pt to work in and "wk"
+    /// costs a third of it for no gain in clarity.
+    var label: String { window == "wk" ? "w" : window }
+}
+
 struct ProviderSnapshot: Identifiable, Equatable {
     var config: ProviderConfig
     /// 0–100 "used" figure for the current session window.
@@ -460,20 +514,98 @@ struct ProviderSnapshot: Identifiable, Equatable {
         return Array(nested.prefix(maxLanes - 1)) + [primary]
     }
 
-    /// The one limit worth reporting outside the panel: which window is closest to
-    /// blocking the next request, and how full it is. The menu bar needs both
-    /// halves — "90%" is useless without knowing whether it's the 5h window or the
-    /// week — and `estimated` so a guess can't be shown as a reported figure.
-    var bindingGauge: (window: String, pct: Double, estimated: Bool)? {
-        guard failure == nil else { return nil }
-        if let binding = bindingLimit {
-            return (binding.isWeekly ? "wk" : "5h", binding.pct, false)
+    /// Which colour step a limit takes inside its provider's band (see
+    /// `ProviderKind.limitHue`). The primary window always takes step 0; the nested
+    /// windows follow in *alphabetical* order of label.
+    ///
+    /// Ranked by label rather than by lane position because lane position is a
+    /// reading of one account's reported list: a provider that reports an extra
+    /// per-model cap would shift every lane after it, so the same weekly limit would
+    /// wear a different colour on two accounts of the same provider. Alphabetical is
+    /// also immune to the API listing the same windows in a different order.
+    ///
+    /// Unknown labels fall to step 0 — a bar for a window the snapshot doesn't list
+    /// can only be the primary one.
+    func laneRank(of label: String) -> Int {
+        guard label != primaryWindowName else { return 0 }
+        let nested = weekly.map(\.label).filter { $0 != primaryWindowName }.sorted()
+        guard let index = nested.firstIndex(of: label) else { return 0 }
+        return index + 1
+    }
+
+    /// Reported nested windows, or nothing for an estimate — whose weekly figures
+    /// are ratios against the user's busiest week rather than a real cap, and so
+    /// can't headline anything outside the card.
+    private var reportedWeekly: [WeeklyMetric] { isEstimated ? [] : weekly }
+
+    /// The limits worth reporting outside the panel, one bar each: the rolling
+    /// session window first, then the weekly cap. **Two readings, not one worst-of.**
+    ///
+    /// A single binding bar conflated the two questions the menu bar exists to
+    /// answer. "Can I work right now" and "will I last the week" have opposite
+    /// answers in the two states that matter most — a fresh 5h window under a spent
+    /// week, and a spent 5h window under a fresh week — and both drew the same
+    /// hundred-percent bar. Which one you were looking at was only in the tooltip.
+    ///
+    /// One bar when the provider genuinely has one limit, never a padded pair: Codex's
+    /// primary limit *is* a 7-day budget, so it takes the weekly bar and there is no
+    /// session lane to draw. An estimated provider likewise reports only its session.
+    ///
+    /// Nested *short* windows stay out. They belong to the card's ring; here they'd
+    /// make the item's height a function of which provider is pinned.
+    var iconGauges: [IconGauge] {
+        // A failure has no quantity behind it — both drawers swap the bars for a
+        // badge rather than show a measurement of nothing.
+        guard failure == nil else { return [] }
+
+        func lane(_ window: String, _ pct: Double, _ estimated: Bool, label: String) -> IconGauge {
+            IconGauge(window: window, pct: pct, estimated: estimated,
+                      colorHex: config.kind.limitColorHex(rank: laneRank(of: label)))
         }
-        // The primary window's own span, never assumed: Codex's is 7 days. "wk"
-        // rather than "7d" because a weekly window's exact length isn't always
-        // reported (Kimi states none for its rolling budget).
-        let window = hasSessionWindow ? primaryWindowName : "wk"
-        return (window, sessionPct, isEstimated)
+        // Worst of the reported weekly caps: an account with a per-model cap has
+        // several, and the tightest is the one that blocks first. "wk" rather than
+        // "7d" because a weekly window's exact length isn't always reported (Kimi
+        // states none for its rolling budget).
+        let weekliest = reportedWeekly.filter(\.isWeekly).max(by: { $0.pct < $1.pct })
+
+        // The primary window is the session lane only when it's short enough to be
+        // one. Codex's spans 7 days, so there the primary *is* the weekly lane.
+        guard hasSessionWindow else {
+            if let weekliest, weekliest.pct > sessionPct {
+                return [lane("wk", weekliest.pct, false, label: weekliest.label)]
+            }
+            return [lane("wk", sessionPct, isEstimated, label: primaryWindowName)]
+        }
+
+        var lanes = [lane(primaryWindowName, sessionPct, isEstimated, label: primaryWindowName)]
+        if let weekliest {
+            lanes.append(lane("wk", weekliest.pct, false, label: weekliest.label))
+        }
+        return lanes
+    }
+
+    /// The figures an icon-sized gauge can't spell out: who they belong to, which
+    /// window each bar measures, and whether it's an estimate. Shared by both places
+    /// that draw `iconGauges` as bare bars — the menu bar item and the collapsed rail
+    /// — so the two can't drift into describing the same reading differently. It's
+    /// also the only place an estimate is marked at that size: a 2–3pt dashed bar is
+    /// mush, so the word does the work the dash does on the card.
+    ///
+    /// `qualifier` rides with the name for callers that must say *which* provider
+    /// this is (the menu bar's "(busiest provider)").
+    func gaugeTooltip(qualifier: String = "") -> String {
+        let who = "\(config.name) · \(config.account)\(qualifier)"
+        if let failure { return "\(who) — \(failure.headline.lowercased())" }
+        let lanes = iconGauges
+        guard !lanes.isEmpty else { return who }
+        // Top bar first, matching the draw order, so the list can be read off the
+        // icon rather than matched against it.
+        let readings = lanes.map { lane in
+            let window = lane.window == "wk" ? "weekly limit" : "\(lane.window) window"
+            return "\(window) \(lane.estimated ? "≈" : "")\(Int(lane.pct.rounded()))% used"
+        }
+        return "\(who) — \(readings.joined(separator: " · "))"
+            + (lanes.contains(where: \.estimated) ? ", estimated" : "")
     }
 
     var mood: Mood {
