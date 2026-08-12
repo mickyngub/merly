@@ -117,9 +117,11 @@ if [ -n "$IDENTITY" ]; then
     --sign "$IDENTITY" "$APP"
   echo "✔ Signed. Next: scripts/dmg.sh notarizes + packages (see docs/specs/distribution.md)."
 else
-  echo "▶ No Developer ID identity found — ad-hoc signing (local use only)."
-  echo "  Copies you download or send will hit Gatekeeper until notarized;"
-  echo "  see docs/specs/distribution.md to enroll and notarize."
+  echo "▶ No Developer ID identity found — ad-hoc signing. This is the normal path:"
+  echo "  Merlyn ships as source, and an app you built locally is never quarantined,"
+  echo "  so Gatekeeper won't gate it. macOS will re-ask for Keychain access after"
+  echo "  each rebuild (every build is a new ad-hoc identity). See"
+  echo "  docs/specs/distribution.md for why, and for the self-signed-cert fix."
   if [ -e "$NESTED" ]; then
     codesign --force --sign - "$NESTED"
   fi
