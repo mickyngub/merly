@@ -18,11 +18,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# No tagged releases (source-only distribution, see SECURITY.md), so the
-# marketing version stays 1.0 and the build number is the commit count —
-# monotonic, numeric (CFBundleVersion must be), and mappable back to the
-# commit a bug report came from via `git log`.
-VERSION="${MERLYN_VERSION:-1.0}"
+# Merlyn is source-distributed (see SECURITY.md), but version tags exist so a
+# build can say which numbered version it came from: the marketing version is
+# the nearest `v*` tag, and the build number is the commit count — monotonic,
+# numeric (CFBundleVersion must be), and mappable back to the exact commit a
+# bug report came from via `git log`.
+VERSION="${MERLYN_VERSION:-$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null | sed 's/^v//' || true)}"
+VERSION="${VERSION:-1.0}"
 BUILD="${MERLYN_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 COPYRIGHT="© 2026 Pichaya Puttekulangkura. MIT Licensed."
 

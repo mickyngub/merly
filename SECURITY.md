@@ -83,6 +83,7 @@ before any public disclosure.
 
 ## Supported versions
 
-Merlyn is source-distributed with no tagged releases: only the latest `main`
-receives security fixes. Rebuild with `scripts/install.sh --update` to pick
-them up.
+Merlyn is source-distributed. Version tags (`v*`) exist so a built app can
+report which version it came from, but they are not release artifacts: only
+the latest `main` receives security fixes. Rebuild with
+`scripts/install.sh --update` to pick them up.
