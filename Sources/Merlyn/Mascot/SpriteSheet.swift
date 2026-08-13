@@ -1,7 +1,9 @@
-// SpriteSheet.swift — loads a bundled 4×4 mood/animation sprite sheet and
-// crops individual frames. Rows are moods (happy/neutral/tired/stressed),
-// columns are idle-cycle frames. Sheets are processed transparent PNGs in
-// Sources/Merlyn/Resources (see scripts that build them from the design grids).
+// SpriteSheet.swift — loads a bundled mood/animation sprite sheet and crops
+// individual frames. Columns are the 4 idle-cycle frames; rows are moods in
+// `Mood.spriteRow` order (up to 8 — the row count is derived from the image
+// height, so taller sheets need no call-site changes). Sheets are processed
+// transparent PNGs in Sources/Merlyn/Resources (see the scripts that build
+// them from the design grids).
 
 import CoreGraphics
 import ImageIO
@@ -25,7 +27,11 @@ struct SpriteSheet {
     }
 }
 
-/// Loads sheets once and memoizes them. Accessed from views on the main thread.
+/// Loads sheets once and memoizes them. `@MainActor` because the cache is
+/// unsynchronized shared state and every caller (views, the status item) is
+/// already on the main thread; `exists`/`formSprite` stay nonisolated — they
+/// are stateless URL probes safe from any thread (readers call them off-main).
+@MainActor
 enum SpriteSheetStore {
     private static var cache: [String: SpriteSheet?] = [:]
 
@@ -39,14 +45,14 @@ enum SpriteSheetStore {
     /// Whether a sheet PNG is bundled, without decoding it — a cheap URL probe
     /// safe to call from any thread (used to pick an evolution form sheet and
     /// degrade gracefully when its art isn't bundled yet).
-    static func exists(_ name: String) -> Bool {
+    nonisolated static func exists(_ name: String) -> Bool {
         Bundle.module.url(forResource: name, withExtension: "png", subdirectory: "Resources") != nil
     }
 
     /// Resolve the sprite sheet for an evolution `form` (0 = base), stepping down
     /// to the highest available lower form and finally the base sheet. Returns
     /// nil only when `base` is nil (the drawn-critter opt-out).
-    static func formSprite(base: String?, form: Int) -> String? {
+    nonisolated static func formSprite(base: String?, form: Int) -> String? {
         guard let base else { return nil }
         if form > 0 {
             for f in stride(from: form, through: 1, by: -1) {
@@ -57,7 +63,7 @@ enum SpriteSheetStore {
         return base
     }
 
-    private static func load(name: String, cols: Int) -> SpriteSheet? {
+    nonisolated private static func load(name: String, cols: Int) -> SpriteSheet? {
         guard let url = Bundle.module.url(forResource: name, withExtension: "png",
                                           subdirectory: "Resources"),
               let src = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -68,5 +74,17 @@ enum SpriteSheetStore {
         let frameWidth = img.width / cols
         let rows = frameWidth > 0 ? img.height / frameWidth : cols
         return SpriteSheet(image: img, cols: cols, rows: rows)
+    }
+}
+
+extension ProviderSnapshot {
+    /// Sprite sheet for the mascot's current evolution form, degrading to the
+    /// highest *available* lower form (and finally the base sheet) so the app
+    /// works before any tier art is bundled. Mood still picks the row; form
+    /// picks the sheet. Lives in the mascot layer (not on the snapshot's own
+    /// file) because it consults the bundled art — the data layer doesn't know
+    /// what's rendered.
+    var resolvedSpriteForm: String? {
+        SpriteSheetStore.formSprite(base: config.resolvedSprite, form: game?.form ?? 0)
     }
 }

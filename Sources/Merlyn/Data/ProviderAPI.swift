@@ -65,9 +65,14 @@ enum ProviderAPIError: Error, CustomStringConvertible {
     /// disables usage access, 402 unpaid, 404 no such resource. Neither a retry
     /// nor a fresh sign-in changes it, so there is genuinely no quota to read —
     /// and no honest way to stand a local estimate in for one.
+    ///
+    /// Deliberately *only* those three codes. Other 4xx (a 400 from request or
+    /// schema drift, say) would be a bug on our side, not a refused account —
+    /// classifying it here would permanently brand a healthy subscription "no
+    /// usage access". Unlisted codes fall through to the cached/estimate path.
     var isAccessDenied: Bool {
         guard case .http(let code) = self else { return false }
-        return (400..<500).contains(code) && code != 401 && code != 429
+        return [402, 403, 404].contains(code)
     }
 
     /// The server couldn't be reached or is erroring out — offline, DNS failure,
@@ -103,11 +108,17 @@ extension Error {
 // MARK: - small sync HTTP helper (always called off the main thread)
 
 enum HTTP {
+    /// Per-request timeout. Providers are fetched sequentially on one work queue,
+    /// so this bounds the worst refresh pass at (providers × timeout) when every
+    /// endpoint is unreachable — 10s keeps four dead providers under the default
+    /// 60s refresh interval, and a healthy endpoint answers in well under it.
+    static let timeout: TimeInterval = 10
+
     static func request(
         _ url: URL, method: String = "GET",
         headers: [String: String] = [:], formBody: [String: String]? = nil
     ) throws -> [String: Any] {
-        var req = URLRequest(url: url, timeoutInterval: 15)
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = method
         headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
         if let formBody {
@@ -119,7 +130,11 @@ enum HTTP {
         }
 
         let semaphore = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var result: Result<(Data, Int), Error>!
+        // Safe without a lock: written exactly once by the completion handler,
+        // and the semaphore orders that write before the read below. The default
+        // covers the impossible no-callback case rather than force-unwrapping.
+        nonisolated(unsafe) var result: Result<(Data, Int), Error> =
+            .failure(ProviderAPIError.network("no response"))
         URLSession.shared.dataTask(with: req) { data, response, error in
             if let error {
                 result = .failure(error)
@@ -130,7 +145,7 @@ enum HTTP {
         }.resume()
         semaphore.wait()
 
-        switch result! {
+        switch result {
         case .failure(let error):
             throw ProviderAPIError.network(error.localizedDescription)
         case .success(let (data, status)):
@@ -143,6 +158,15 @@ enum HTTP {
     }
 }
 
+// Cached because ISO8601DateFormatter is expensive to build and thread-safe to
+// share; parseAPIDate runs for every window of every provider each refresh.
+private let fractionalISOParser: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+private let plainISOParser = ISO8601DateFormatter()
+
 /// Parses API dates: ISO 8601 with any fractional precision, or epoch seconds.
 func parseAPIDate(_ value: Any?) -> Date? {
     if let n = value as? NSNumber { return Date(timeIntervalSince1970: n.doubleValue) }
@@ -151,11 +175,7 @@ func parseAPIDate(_ value: Any?) -> Date? {
     if let r = s.range(of: #"\.\d+"#, options: .regularExpression) {
         s = s.replacingCharacters(in: r, with: String(s[r].prefix(4)))
     }
-    let f = ISO8601DateFormatter()
-    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let d = f.date(from: s) { return d }
-    f.formatOptions = [.withInternetDateTime]
-    return f.date(from: s)
+    return fractionalISOParser.date(from: s) ?? plainISOParser.date(from: s)
 }
 
 /// Reads numbers that providers serialize as Int, Double, or String.
@@ -177,6 +197,8 @@ struct UsageWindow {
 // MARK: - Claude
 
 enum ClaudeUsageAPI {
+    static let usageEndpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+
     struct Usage {
         var fiveHour: UsageWindow?
         var sevenDay: UsageWindow?
@@ -226,7 +248,7 @@ enum ClaudeUsageAPI {
         }
 
         let obj = try HTTP.request(
-            URL(string: "https://api.anthropic.com/api/oauth/usage")!,
+            usageEndpoint,
             headers: [
                 "Authorization": "Bearer \(token)",
                 "anthropic-beta": "oauth-2025-04-20",
@@ -301,6 +323,8 @@ enum ClaudeUsageAPI {
 // MARK: - Codex
 
 enum CodexUsageAPI {
+    static let usageEndpoint = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
+
     struct Usage {
         var primary: UsageWindow?
         var secondary: UsageWindow?
@@ -320,7 +344,7 @@ enum CodexUsageAPI {
         let accountId = tokens["account_id"] as? String ?? ""
 
         let obj = try HTTP.request(
-            URL(string: "https://chatgpt.com/backend-api/wham/usage")!,
+            usageEndpoint,
             headers: [
                 "Authorization": "Bearer \(token)",
                 "chatgpt-account-id": accountId,
@@ -388,11 +412,13 @@ enum KimiUsageAPI {
     }
 
     private static let clientId = "17e5f671-d194-4dfb-9706-5516cb48c098"
+    static let usageEndpoint = URL(string: "https://api.kimi.com/coding/v1/usages")!
+    static let tokenEndpoint = URL(string: "https://auth.kimi.com/api/oauth/token")!
 
     static func fetch(configDir: String) throws -> Usage {
         let token = try freshAccessToken(configDir: configDir)
         let obj = try HTTP.request(
-            URL(string: "https://api.kimi.com/coding/v1/usages")!,
+            usageEndpoint,
             headers: ["Authorization": "Bearer \(token)"]
         )
 
@@ -409,6 +435,8 @@ enum KimiUsageAPI {
         }
 
         var usage = Usage(weekly: window(obj["usage"] as? [String: Any], seconds: 7 * 86400))
+        // Kimi's extra windows are unlabeled, so labels are generated from the
+        // span; the reader dedupes any that collide (see WeeklyMetric.dedupingLabels).
         for item in obj["limits"] as? [[String: Any]] ?? [] {
             let detail = (item["detail"] as? [String: Any]) ?? item
             let win = item["window"] as? [String: Any]
@@ -440,18 +468,20 @@ enum KimiUsageAPI {
         let credsURL = URL(fileURLWithPath: configDir).appendingPathComponent("credentials/kimi-code.json")
         let lockPath = configDir + "/oauth/kimi-code"
 
-        func load() throws -> [String: Any] {
+        /// The raw credential dict plus its access token, typed at the one place
+        /// the shape is checked — so no later call site has to force-cast.
+        func load() throws -> (creds: [String: Any], accessToken: String) {
             guard let data = try? Data(contentsOf: credsURL),
                   let creds = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  creds["access_token"] is String
+                  let token = creds["access_token"] as? String
             else { throw ProviderAPIError.noCredentials("credentials/kimi-code.json") }
-            return creds
+            return (creds, token)
         }
 
-        var creds = try load()
+        var (creds, accessToken) = try load()
         let now = Date().timeIntervalSince1970
         if let expiresAt = flexDouble(creds["expires_at"]), expiresAt > now + 60 {
-            return creds["access_token"] as! String
+            return accessToken
         }
 
         try? FileManager.default.createDirectory(
@@ -460,12 +490,18 @@ enum KimiUsageAPI {
         )
         let fd = open(lockPath, O_WRONLY | O_CREAT, 0o644)
         guard fd >= 0 else { throw ProviderAPIError.network("cannot open refresh lock") }
-        flock(fd, LOCK_EX)
+        // Refreshing without the lock is exactly the race that logs the user's
+        // CLI out (two refreshers, one rotated token lost) — so a failed flock
+        // aborts the refresh rather than proceeding unlocked.
+        guard flock(fd, LOCK_EX) == 0 else {
+            close(fd)
+            throw ProviderAPIError.network("cannot acquire refresh lock")
+        }
         defer { flock(fd, LOCK_UN); close(fd) }
 
-        creds = try load() // re-read under the lock
+        (creds, accessToken) = try load() // re-read under the lock
         if let expiresAt = flexDouble(creds["expires_at"]), expiresAt > now + 60 {
-            return creds["access_token"] as! String
+            return accessToken
         }
         guard let refreshToken = creds["refresh_token"] as? String else {
             throw ProviderAPIError.expiredToken("no refresh token — run kimi to re-auth")
@@ -474,7 +510,7 @@ enum KimiUsageAPI {
         let tok: [String: Any]
         do {
             tok = try HTTP.request(
-                URL(string: "https://auth.kimi.com/api/oauth/token")!,
+                tokenEndpoint,
                 method: "POST",
                 formBody: [
                     "client_id": clientId,

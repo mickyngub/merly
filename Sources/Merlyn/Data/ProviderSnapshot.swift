@@ -1,262 +1,21 @@
-// Models.swift — provider configuration and usage snapshot types.
+// ProviderSnapshot.swift — the usage-reading domain model: limit windows,
+// failure states, per-provider snapshots, and the cached "last good" reading.
 
 import Foundation
 
-enum ProviderKind: String, Codable, CaseIterable {
-    /// Claude Code-style config dir: transcripts under projects/**/*.jsonl
-    case claude
-    /// Codex CLI: rollout files under sessions/YYYY/MM/DD/*.jsonl with real rate_limits
-    case codex
-    /// Kimi Code: wire.jsonl event logs under sessions/wd_*/ses_*/agents/*
-    case kimi
+/// Usage thresholds shared by the data layer and every gauge surface. They live
+/// here (not in `Theme`) because snapshot logic like `blockingLimit` and the
+/// mascot mood needs them, and the data layer must not depend on SwiftUI.
+enum UsageThresholds {
+    /// Where a limit turns red — the one severity escalation any gauge applies
+    /// (`Theme.limitColor`). There is no amber band: see `limitColor` for why.
+    static let dangerPct: Double = 88
 
-    var displayName: String {
-        switch self {
-        case .claude: "Claude"
-        case .codex: "Codex"
-        case .kimi: "Kimi"
-        }
-    }
-
-    /// Where the matching CLI keeps its config by default.
-    var defaultDir: String {
-        switch self {
-        case .claude: "~/.claude"
-        case .codex: "~/.codex"
-        case .kimi: "~/.kimi-code"
-        }
-    }
-
-    /// The CLI subcommand that starts this kind's own sign-in flow.
-    ///
-    /// Merlyn never mints or refreshes a token itself — see the never-refresh rule
-    /// in `docs/provider-integration.md`. The sign-in button runs the CLI's login
-    /// in a terminal and lets it own the credentials, exactly as if the user had
-    /// opened the agent and typed this.
-    var loginCommand: String {
-        switch self {
-        case .claude: "claude auth login"
-        case .codex: "codex login"
-        case .kimi: "kimi login"
-        }
-    }
-
-    /// Env var that points this kind's CLI at a non-default config dir, so a
-    /// second account (`~/.claude-2`, `~/.claude-work`) signs into its own profile
-    /// instead of overwriting the first. nil when the CLI has no such override.
-    var configDirEnvVar: String? {
-        switch self {
-        case .claude: "CLAUDE_CONFIG_DIR"
-        case .codex: "CODEX_HOME"
-        case .kimi: nil
-        }
-    }
-
-    /// Sprite sheets this kind's mascot may use — its own family only, so the
-    /// editor can't dress a Claude provider up as Codex/Kimi. One art per kind:
-    /// color is set by the palette (the old "Work" sprite was just a blue Clawd).
-    var spriteFamily: [(id: String, label: String)] {
-        switch self {
-        case .claude: [("clawd-sprite", "Clawd")]
-        case .codex: [("codex-sprite", "Codex")]
-        case .kimi: [("kimi-sprite", "Kimi")]
-        }
-    }
-
-    /// Where this kind's limit colours start on the wheel — see `limitColorHex`. The
-    /// kinds sit ~100° apart, wide enough that no Claude lane can be mistaken for a
-    /// Codex one, and the run avoids the two hues severity owns: `Theme.danger`
-    /// (~358°) and `Theme.warn` (~40°) must never be something a healthy limit wears.
-    var limitBaseHue: Double {
-        switch self {
-        case .claude: 60    // yellow → lime → green
-        case .codex: 190    // cyan → blue → indigo
-        case .kimi: 290     // violet → magenta → pink
-        }
-    }
-
-    /// The colour a limit lane wears, packed 0xRRGGBB: this kind's band, stepped by
-    /// the limit's category rank (see `ProviderSnapshot.laneRank`). Hex rather than
-    /// `Color` because the menu bar gauge draws in AppKit.
-    ///
-    /// Keyed on the *kind*, never on the account's mascot palette: two Claude cards
-    /// stack in one panel, and a colour that meant "5h" on one and "weekly" on the
-    /// next made the panel unreadable. Account identity stays with the mascot.
-    ///
-    /// Each step moves hue *and* lightness. Hue alone doesn't separate lanes — 25°
-    /// apart in the greens gave "All models" and "Fable only" two near-identical
-    /// bars — and hue steps wide enough to fix that would walk out of the kind's
-    /// band. Alternating light/dark makes neighbouring lanes differ in value, which
-    /// survives a 6pt bar and a 3pt menu bar gauge.
-    func limitColorHex(rank: Int) -> UInt32 {
-        let hue = limitBaseHue + Double(rank) * 25
-        let light = rank == 0 ? 0 : (rank.isMultiple(of: 2) ? -0.15 : 0.14)
-        return MascotPalette.fromHue(hue, lightBoost: light).B
-    }
-}
-
-/// The app's own mascot, shown beside the panel's "Merlyn" title. Independent of
-/// any provider; its look is user-editable while its mood tracks the busiest
-/// provider's pressure. (The menu bar always wears the *reported provider's*
-/// critter instead, so a reading always has a visible subject.)
-struct DefaultMascot: Codable, Equatable {
-    var style: MascotStyle
-    /// User-chosen index into the fated deck (see `Fate`). The deck's *hues* are
-    /// fixed per machine; only this mapping is editable. Optional so older configs
-    /// decode (absent → the signature slot 0).
-    var colorSlot: Int?
-    /// Bundled sprite-sheet basename; "" renders the drawn critter instead.
-    var sprite: String
-
-    static let standard = DefaultMascot(style: .cat, sprite: "merlyn-sprite")
-
-    /// Sprite sheet to render, or nil when drawing the critter.
-    var resolvedSprite: String? { sprite.isEmpty ? nil : sprite }
-
-    /// The menu bar mascot sits in deck slot 0 by default — the install's
-    /// signature hue — so adding or removing providers never recolors it.
-    var resolvedColorSlot: Int { colorSlot ?? 0 }
-
-    /// Fate's one-shot shiny verdict for the menu bar mascot.
-    var isShiny: Bool { Fate.isShiny(id: "menu-bar-mascot") }
-
-    var resolvedPalette: MascotPalette { Fate.palette(slot: resolvedColorSlot, shiny: isShiny) }
-}
-
-/// Per-install destiny for a mascot's color and shininess. Everything derives
-/// deterministically from the home path — there is no stored seed, so a mascot's
-/// fate can't be re-rolled by deleting or editing providers.json. Reinstalling
-/// macOS or changing username gives a new fate; that's the only thing that does.
-///
-/// **Color** is a "deck": one signature `base` hue per machine, then evenly
-/// spread golden-angle hues for each `slot`. The deck's hues are fixed; which
-/// `slot` a mascot wears is the only editable part (stored as `colorSlot`).
-///
-/// **Shiny** is a one-shot lottery keyed by mascot id (independent of color, so a
-/// mascot's luck never changes when others are added, removed, or recolored). The
-/// lucky few wear a gleaming `+150°` variant. No accumulation, no "moment of
-/// catching" — you either were born lucky on this machine or you weren't.
-enum Fate {
-    /// How many distinct hues the editor offers (the golden-angle deck size).
-    static let deckSize = 6
-    /// The most-separated rotation increment — successive slots are maximally apart.
-    static let goldenAngle = 137.50776405003785
-
-    /// 1-in-N one-shot shiny odds. `MERLYN_SHINY_RARITY` overrides it for tuning or
-    /// testing (set it to 1 to make every mascot shiny).
-    static var rarity: UInt64 {
-        if let raw = ProcessInfo.processInfo.environment["MERLYN_SHINY_RARITY"],
-           let n = UInt64(raw), n >= 1 { return n }
-        return 128
-    }
-
-    /// The install's signature hue (0..<360), hashed from the home path.
-    static func baseHue(home: String = NSHomeDirectory()) -> Double {
-        Double(hash(home) % 360)
-    }
-
-    /// Golden-angle deck hue for `slot`: base + slot×137.5°. Evenly spread and
-    /// append-stable — a new mascot takes the next slot without moving earlier ones.
-    static func deckHue(slot: Int, home: String = NSHomeDirectory()) -> Double {
-        (baseHue(home: home) + Double(slot) * goldenAngle)
-            .truncatingRemainder(dividingBy: 360)
-    }
-
-    /// The hue a mascot actually wears: its deck hue, shifted for a shiny. Exposed
-    /// so anything deriving companion colours (the card's ring lanes) starts from
-    /// the same hue the mascot is wearing rather than the unshifted deck value.
-    static func hue(slot: Int, shiny: Bool, home: String = NSHomeDirectory()) -> Double {
-        deckHue(slot: slot, home: home) + (shiny ? 150 : 0)
-    }
-
-    /// The resolved palette for a mascot in `slot`, gleaming if `shiny`.
-    static func palette(slot: Int, shiny: Bool, home: String = NSHomeDirectory()) -> MascotPalette {
-        let hue = hue(slot: slot, shiny: shiny, home: home)
-        return shiny
-            ? .fromHue(hue, satBoost: 0.08, lightBoost: 0.04)
-            : .fromHue(hue)
-    }
-
-    /// One-shot shiny verdict, keyed by mascot id. Stable forever.
-    static func isShiny(id: String, home: String = NSHomeDirectory()) -> Bool {
-        hash("\(home)|\(id)|shiny") % rarity == 0
-    }
-
-    /// Stable per-id deck slot, used only as a safety fallback when a mascot has
-    /// no stored slot yet (normal slots are assigned at creation/migration).
-    static func fallbackSlot(id: String, home: String = NSHomeDirectory()) -> Int {
-        Int(hash("\(home)|\(id)|slot") % UInt64(deckSize))
-    }
-
-    /// FNV-1a over the string's UTF-8 → uniform-ish 64-bit.
-    private static func hash(_ s: String) -> UInt64 {
-        var h: UInt64 = 0xcbf29ce484222325
-        for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
-        return h
-    }
-}
-
-struct ProviderConfig: Codable, Identifiable, Equatable {
-    var id: String
-    var name: String
-    var account: String
-    var kind: ProviderKind
-    var dir: String
-    var style: MascotStyle?
-    /// User-chosen index into the fated deck (see `Fate`); the deck's hues are
-    /// fixed per machine, only this mapping is editable. Optional so older configs
-    /// decode (absent → a slot assigned by position on first load).
-    var colorSlot: Int?
-    /// Bundled sprite-sheet basename (4×4 grid: rows = mood, cols = idle frames).
-    /// When resolvable, the panel mascot renders this art instead of the drawn critter.
-    var sprite: String?
-    /// Optional fixed denominators for token-estimated providers. When absent,
-    /// limits auto-calibrate to the busiest 5h block / 7-day stretch on record.
-    var sessionTokenLimit: Int?
-    var weeklyTokenLimit: Int?
-
-    var expandedDir: String {
-        (dir as NSString).expandingTildeInPath
-    }
-
-    /// The shell line that signs this specific provider back in: the CLI's own
-    /// login, prefixed with the config-dir env var when this provider doesn't live
-    /// in the kind's default folder (a second account signs into its own profile).
-    var loginShellCommand: String {
-        guard dir != kind.defaultDir, let envVar = kind.configDirEnvVar else {
-            return kind.loginCommand
-        }
-        return "\(envVar)=\(expandedDir.shellQuoted) \(kind.loginCommand)"
-    }
-
-    var resolvedStyle: MascotStyle {
-        if let style { return style }
-        switch kind {
-        case .claude: return .cat
-        case .codex: return .robot
-        case .kimi: return .round
-        }
-    }
-
-    /// The deck slot this provider wears, falling back to a stable per-id slot
-    /// until the position-based default is persisted (see `ConfigStore.migrate`).
-    var resolvedColorSlot: Int { colorSlot ?? Fate.fallbackSlot(id: id) }
-
-    /// Fate's one-shot shiny verdict for this provider.
-    var isShiny: Bool { Fate.isShiny(id: id) }
-
-    var resolvedPalette: MascotPalette { Fate.palette(slot: resolvedColorSlot, shiny: isShiny) }
-
-    /// Sprite sheet to render in the panel, falling back to the per-kind default
-    /// art. Returns nil only if a provider explicitly opts out via sprite: "".
-    var resolvedSprite: String? {
-        if let sprite { return sprite.isEmpty ? nil : sprite }
-        switch kind {
-        case .claude: return "clawd-sprite"
-        case .codex: return "codex-sprite"
-        case .kimi: return "kimi-sprite"
-        }
-    }
+    /// Where a limit stops being "nearly out" and starts actually blocking work.
+    /// Deliberately not `dangerPct`: a red 94% weekly is still usable, and saying
+    /// "maxed" there is wrong. 99.5 rather than 100 so it agrees with the rounded
+    /// "100% used" the bars print — the API reports fractions like 99.6.
+    static let exhaustedPct: Double = 99.5
 }
 
 /// Naming and classifying a limit window by the span the provider reports.
@@ -265,21 +24,31 @@ struct ProviderConfig: Codable, Identifiable, Equatable {
 /// primary window from 5h to 7 days with no rename, so every label built on that
 /// assumption ("5h limit · resets in 3d 18h") started lying.
 enum LimitWindow {
+    /// A window at or past this span is *named* "Weekly". Higher than
+    /// `standingBudgetSeconds` on purpose: a 3-day window behaves like a standing
+    /// budget (lane order, blocking copy) but calling it "Weekly" would lie, so
+    /// it's named "3d" while still classified weekly by `isWeekly`.
+    static let weeklyNameSeconds: Double = 144 * 3600
+
+    /// A window at or past this span is a standing budget rather than a rolling
+    /// session. Drives the ring's lane order and the card's "what's blocking
+    /// you" wording (see `isWeekly`).
+    static let standingBudgetSeconds: Double = 48 * 3600
+
     /// "5h", "24h", "3d", "Weekly" — what to call a window of this length.
     /// Defaults to "5h" when a provider reports no span, which is what every
     /// primary window was before Codex changed.
     static func name(seconds: Double?) -> String {
         guard let seconds, seconds > 0 else { return "5h" }
+        if seconds >= weeklyNameSeconds { return "Weekly" }
         let hours = seconds / 3600
-        if hours >= 144 { return "Weekly" }
-        if hours >= 48 { return "\(Int((hours / 24).rounded()))d" }
+        if seconds >= standingBudgetSeconds { return "\(Int((hours / 24).rounded()))d" }
         if hours >= 1 { return "\(Int(hours.rounded()))h" }
         return "\(Int((seconds / 60).rounded()))m"
     }
 
-    /// Long enough to be a standing budget rather than a rolling session. Drives
-    /// the ring's lane order and the card's "what's blocking you" wording.
-    static func isWeekly(seconds: Double?) -> Bool { (seconds ?? 0) >= 48 * 3600 }
+    /// Long enough to be a standing budget rather than a rolling session.
+    static func isWeekly(seconds: Double?) -> Bool { (seconds ?? 0) >= standingBudgetSeconds }
 }
 
 /// Why a provider has no usable numbers.
@@ -363,6 +132,23 @@ struct WeeklyMetric: Identifiable, Equatable, Codable {
 
     var isWeekly: Bool { isWeeklyWindow ?? true }
     var id: String { label }
+
+    /// The label doubles as SwiftUI identity (`id`) and the lane-colour key
+    /// (`laneRank`), so it must be unique within one snapshot — but a provider
+    /// can report two windows that generate the same label (Kimi lists several
+    /// unlabeled "Rate limit" windows). Suffix duplicates "#2", "#3", … at
+    /// assembly time so identity never collides.
+    static func dedupingLabels(_ metrics: [WeeklyMetric]) -> [WeeklyMetric] {
+        var counts: [String: Int] = [:]
+        return metrics.map { metric in
+            let n = (counts[metric.label] ?? 0) + 1
+            counts[metric.label] = n
+            guard n > 1 else { return metric }
+            var copy = metric
+            copy.label = "\(metric.label) #\(n)"
+            return copy
+        }
+    }
 }
 
 /// One bar in an icon-sized gauge — the menu bar item and the collapsed rail. Not
@@ -434,14 +220,6 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// server, where it would change nothing. Only this state offers the button.
     var needsSignIn: Bool { failure == .signedOut }
 
-    /// Sprite sheet for the mascot's current evolution form, degrading to the
-    /// highest *available* lower form (and finally the base sheet) so the app
-    /// works before any tier art is bundled. Mood still picks the row; form
-    /// picks the sheet.
-    var resolvedSpriteForm: String? {
-        SpriteSheetStore.formSprite(base: config.resolvedSprite, form: game?.form ?? 0)
-    }
-
     /// How close this provider is to *any* of its limits — a session can be
     /// fresh (0%) while the weekly cap is nearly exhausted. Drives the mascot
     /// mood and the menu bar peak pick. Estimates use the session figure only:
@@ -477,7 +255,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// Exhausted, not merely red: at 94% weekly the provider still works, so the
     /// line stays on the session countdown and the red ring carries the warning.
     var blockingLimit: WeeklyMetric? {
-        guard let binding = bindingLimit, binding.pct >= Theme.exhaustedPct else { return nil }
+        guard let binding = bindingLimit, binding.pct >= UsageThresholds.exhaustedPct else { return nil }
         return binding
     }
 
@@ -515,8 +293,8 @@ struct ProviderSnapshot: Identifiable, Equatable {
     }
 
     /// Which colour step a limit takes inside its provider's band (see
-    /// `ProviderKind.limitHue`). The primary window always takes step 0; the nested
-    /// windows follow in *alphabetical* order of label.
+    /// `ProviderKind.limitColorHex`). The primary window always takes step 0; the
+    /// nested windows follow in *alphabetical* order of label.
     ///
     /// Ranked by label rather than by lane position because lane position is a
     /// reading of one account's reported list: a provider that reports an extra
@@ -658,6 +436,33 @@ struct ProviderSnapshot: Identifiable, Equatable {
     }
 }
 
+/// Countdown and blocking-limit copy shared by the card's clock line and the
+/// headless `--print` snapshot — formatting a *reading*, not a layout choice,
+/// so it lives with the data rather than on a view.
+enum UsageFormatting {
+    /// What's standing between you and the next request, for the clock line. Kept
+    /// short enough to sit on one line beside the mascot and the ring.
+    static func blockingText(_ blocking: WeeklyMetric, now: Date) -> String {
+        let word = blocking.isWeekly ? "Weekly" : "5h cap"
+        // Terse because the wider nested ring leaves this line ~136pt; the clock
+        // glyph beside it already supplies "resets".
+        guard let resetAt = blocking.resetAt else { return "\(word) maxed" }
+        return "\(word) in \(duration(until: resetAt, now: now))"
+    }
+
+    static func duration(until end: Date, now: Date) -> String {
+        let remaining = end.timeIntervalSince(now)
+        if remaining <= 0 { return "now" }
+        let minutes = Int(remaining / 60)
+        let hours = minutes / 60
+        // Weekly windows are days out; "91h 55m" is unreadable as a countdown.
+        if hours >= 24 { return "\(hours / 24)d \(hours % 24)h" }
+        if hours > 0 { return "\(hours)h \(minutes % 60)m" }
+        let seconds = Int(remaining) % 60
+        return "\(minutes)m \(seconds)s"
+    }
+}
+
 /// Persisted last-good API reading, used to survive a transient fetch failure
 /// instead of dropping to misleading local estimates.
 struct RealReading: Codable {
@@ -680,169 +485,4 @@ struct ReaderContext {
     /// Set on a user-initiated refresh so readers bypass the post-429 cooldown
     /// and re-attempt the live fetch instead of silently returning cached numbers.
     var force: Bool = false
-}
-
-enum LastGoodStore {
-    static var file: URL { AppPaths.supportDir.appendingPathComponent("last-good.json") }
-
-    static func load() -> [String: RealReading] {
-        guard let data = try? Data(contentsOf: file),
-              let dict = try? JSONDecoder().decode([String: RealReading].self, from: data)
-        else { return [:] }
-        return dict
-    }
-
-    static func save(_ dict: [String: RealReading]) {
-        try? FileManager.default.createDirectory(at: AppPaths.supportDir, withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(dict) {
-            try? data.write(to: file)
-        }
-    }
-}
-
-/// User-tunable alerting. Persisted inside AppConfig so it rides the same
-/// providers.json the engine reloads every refresh.
-struct NotificationSettings: Codable, Equatable {
-    /// Master switch for all usage alerts.
-    var enabled: Bool = false
-    /// Notify when a provider's closest-limit pressure first crosses this %.
-    var thresholdPct: Double = 80
-    /// Notify when a previously-busy session window resets and frees up.
-    var notifyOnReset: Bool = true
-}
-
-struct AppConfig: Codable {
-    var sessionHours: Double
-    var refreshSeconds: Double
-    var providers: [ProviderConfig]
-    /// Optional so configs written before alerts existed still decode (a missing
-    /// key would otherwise throw and wipe the user's providers back to default).
-    var notifications: NotificationSettings?
-    /// Optional so older configs decode; falls back to `.standard` when absent.
-    var defaultMascot: DefaultMascot?
-    /// Which provider the menu bar gauge reports on. nil (and an id that no longer
-    /// matches a provider) means whichever is closest to a limit — the app's
-    /// original always-busiest behaviour, kept as the default because it's the one
-    /// pick that can't go stale.
-    var menuBarProviderId: String? = nil
-
-    /// Always-present view of the alert settings, defaulting when absent.
-    var notificationSettings: NotificationSettings {
-        get { notifications ?? NotificationSettings() }
-        set { notifications = newValue }
-    }
-
-    /// Always-present view of the menu bar mascot, defaulting when absent.
-    var defaultMascotConfig: DefaultMascot {
-        get { defaultMascot ?? .standard }
-        set { defaultMascot = newValue }
-    }
-
-    /// Every coding CLI Merlyn can set up out of the box, paired with the on-disk
-    /// markers that prove the CLI is actually configured. Markers are specific
-    /// files (not just the dir), so a dir that merely holds a symlinked
-    /// `skills/` folder isn't mistaken for a real install. Drives both the
-    /// static default and first-run auto-detection.
-    static let knownProviders: [(config: ProviderConfig, markers: [String])] = [
-        (ProviderConfig(id: "claude-personal", name: "Claude", account: "Personal",
-                        kind: .claude, dir: "~/.claude", style: .cat, colorSlot: 1),
-         ["~/.claude/projects", "~/.claude.json"]),
-        (ProviderConfig(id: "claude-work", name: "Claude", account: "Work",
-                        kind: .claude, dir: "~/.claude-work", style: .catTie, colorSlot: 2),
-         ["~/.claude-work/projects", "~/.claude-work.json"]),
-        (ProviderConfig(id: "codex", name: "Codex", account: "OpenAI",
-                        kind: .codex, dir: "~/.codex", style: .robot, colorSlot: 3),
-         ["~/.codex/auth.json"]),
-        (ProviderConfig(id: "kimi", name: "Kimi", account: "Moonshot",
-                        kind: .kimi, dir: "~/.kimi-code", style: .round, colorSlot: 4),
-         ["~/.kimi-code/credentials/kimi-code.json"]),
-    ]
-
-    /// First-run discovery: keep only providers whose marker exists on disk.
-    static func autodetectedProviders() -> [ProviderConfig] {
-        knownProviders
-            .filter { $0.markers.contains { FileManager.default.fileExists(atPath: ($0 as NSString).expandingTildeInPath) } }
-            .map(\.config)
-    }
-
-    /// Static fallback used when auto-detection finds nothing, so a brand-new
-    /// install isn't an empty window.
-    static let `default` = AppConfig(
-        sessionHours: 5,
-        refreshSeconds: 60,
-        providers: knownProviders.map(\.config),
-        notifications: NotificationSettings(),
-        defaultMascot: .standard
-    )
-
-    /// The config to write on first launch: detected providers when any CLI is
-    /// found, otherwise the static default.
-    static func firstRun() -> AppConfig {
-        let detected = autodetectedProviders()
-        guard !detected.isEmpty else { return .default }
-        return AppConfig(
-            sessionHours: 5, refreshSeconds: 60, providers: detected,
-            notifications: NotificationSettings(), defaultMascot: .standard
-        )
-    }
-}
-
-enum AppPaths {
-    static var supportDir: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Merlyn", isDirectory: true)
-    }
-    static var configFile: URL { supportDir.appendingPathComponent("providers.json") }
-    static var cacheFile: URL { supportDir.appendingPathComponent("usage-cache.json") }
-}
-
-enum ConfigStore {
-    static func load() -> AppConfig {
-        let url = AppPaths.configFile
-        if let data = try? Data(contentsOf: url),
-           var config = try? JSONDecoder().decode(AppConfig.self, from: data) {
-            if migrate(&config) { save(config) }
-            return config
-        }
-        let config = AppConfig.firstRun()
-        save(config)
-        return config
-    }
-
-    /// Normalize retired identifiers so old configs keep resolving. The "Work"
-    /// Claude sprite was a recolored Clawd; now that any sprite follows the
-    /// palette, it collapses to "clawd-sprite" (its steel palette still tints it
-    /// blue). Returns true when something changed, so the caller can persist.
-    private static func migrate(_ config: inout AppConfig) -> Bool {
-        var changed = false
-        for i in config.providers.indices where config.providers[i].sprite == "clawd-work-sprite" {
-            config.providers[i].sprite = "clawd-sprite"
-            changed = true
-        }
-        if config.defaultMascot?.sprite == "clawd-work-sprite" {
-            config.defaultMascot?.sprite = "clawd-sprite"
-            changed = true
-        }
-        // Assign each mascot a default deck slot by position the first time we see
-        // a config without one (menu bar = 0; providers spread 1..N). The slot is
-        // editable afterward; the deck's hues stay fated. See `Fate`.
-        for i in config.providers.indices where config.providers[i].colorSlot == nil {
-            config.providers[i].colorSlot = (i + 1) % Fate.deckSize
-            changed = true
-        }
-        if config.defaultMascot != nil, config.defaultMascot?.colorSlot == nil {
-            config.defaultMascot?.colorSlot = 0
-            changed = true
-        }
-        return changed
-    }
-
-    static func save(_ config: AppConfig) {
-        try? FileManager.default.createDirectory(at: AppPaths.supportDir, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? encoder.encode(config) {
-            try? data.write(to: AppPaths.configFile)
-        }
-    }
 }

@@ -12,6 +12,9 @@ final class UsageEngine: ObservableObject {
 
     private(set) var appConfig: AppConfig
     private var timer: Timer?
+    /// The cadence the live timer was armed with, so a providers.json edit to
+    /// refreshSeconds takes effect on the next refresh instead of after a restart.
+    private var timerInterval: TimeInterval = 0
     private var cooldowns: [String: Date] = [:]
     /// Set when refresh() is called mid-pass, so config edits (e.g. a provider
     /// just added) aren't lost to the in-flight pass's stale config.
@@ -28,10 +31,21 @@ final class UsageEngine: ObservableObject {
 
     func start() {
         refresh()
-        let interval = max(appConfig.refreshSeconds, 15)
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        scheduleTimer()
+    }
+
+    /// (Re)arms the poll timer at the configured cadence, flooring it so a typo'd
+    /// refreshSeconds can't hammer the APIs.
+    private func scheduleTimer() {
+        timer?.invalidate()
+        timerInterval = max(appConfig.refreshSeconds, 15)
+        timer = Timer.scheduledTimer(withTimeInterval: timerInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+    }
+
+    deinit {
+        timer?.invalidate()
     }
 
     /// `force` (a user-initiated refresh) makes readers bypass the per-provider
@@ -46,6 +60,10 @@ final class UsageEngine: ObservableObject {
         isRefreshing = true
         // Pick up config edits (e.g. a provider added via providers.json).
         appConfig = ConfigStore.load()
+        // …including a changed poll cadence, which the armed timer captured.
+        if timer != nil, max(appConfig.refreshSeconds, 15) != timerInterval {
+            scheduleTimer()
+        }
         let config = appConfig
         let cooldownsIn = cooldowns
 
@@ -81,8 +99,10 @@ final class UsageEngine: ObservableObject {
 
     /// Append a provider to providers.json and kick a refresh. An empty snapshot
     /// shows the card immediately; the refresh pass fills in real numbers.
+    /// Mutates the in-memory config like every other mutator — refresh() reloads
+    /// from disk anyway, so re-reading here could only resurrect stale disk state.
     func addProvider(_ provider: ProviderConfig) {
-        var config = ConfigStore.load()
+        var config = appConfig
         config.providers.append(provider)
         ConfigStore.save(config)
         appConfig = config
@@ -132,6 +152,30 @@ final class UsageEngine: ObservableObject {
         return appConfig.providers.contains { $0.id != id && Self.normalizedDir($0.dir) == norm }
     }
 
+    /// Whether `dir` points at an existing folder. On the engine so views never
+    /// touch the filesystem directly (repo rule); a single stat, called from the
+    /// add form's onChange rather than per render.
+    nonisolated func directoryExists(_ dir: String) -> Bool {
+        var isDir: ObjCBool = false
+        let path = (dir as NSString).expandingTildeInPath
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    /// Slug from name+account (falling back to the kind), de-duped against the
+    /// live provider ids with a numeric suffix — "Claude Work " → "claude-work".
+    func uniqueProviderID(name: String, account: String, kind: ProviderKind) -> String {
+        let existing = Set(appConfig.providers.map(\.id))
+        var base = "\(name) \(account)".slugified
+        if base.isEmpty { base = kind.rawValue }
+        var id = base
+        var n = 2
+        while existing.contains(id) {
+            id = "\(base)-\(n)"
+            n += 1
+        }
+        return id
+    }
+
     /// Persist tweaked alert settings. Lives in AppConfig so the next refresh
     /// (which reloads from disk) keeps them.
     func updateNotificationSettings(_ settings: NotificationSettings) {
@@ -141,14 +185,14 @@ final class UsageEngine: ObservableObject {
         appConfig = config
     }
 
-    /// Persist the menu bar's default mascot. Re-emits `snapshots` so the status
-    /// item (which observes that publisher) re-renders the new look immediately.
+    /// Persist the menu bar's default mascot. Republishes so the status item
+    /// (which observes `$snapshots`) re-renders the new look immediately.
     func updateDefaultMascot(_ mascot: DefaultMascot) {
         var config = appConfig
         config.defaultMascotConfig = mascot
         ConfigStore.save(config)
         appConfig = config
-        snapshots = snapshots
+        republish()
     }
 
     /// Tilde-expanded, trailing-slash-stripped path for stable folder comparison.
@@ -179,14 +223,22 @@ final class UsageEngine: ObservableObject {
         return snapshots.max { $0.pressurePct < $1.pressurePct }
     }
 
-    /// Pin (or unpin, with nil) the provider the menu bar gauge reports. Re-emits
-    /// `snapshots` so the status item — which observes that publisher — re-renders
-    /// immediately instead of at the next refresh tick.
+    /// Pin (or unpin, with nil) the provider the menu bar gauge reports.
+    /// Republishes so the status item re-renders immediately instead of at the
+    /// next refresh tick.
     func updateMenuBarProvider(_ id: String?) {
         var config = appConfig
         config.menuBarProviderId = id
         ConfigStore.save(config)
         appConfig = config
+        republish()
+    }
+
+    /// Re-emits `snapshots` unchanged. Observers of the `$snapshots` publisher
+    /// (the status item, the rail) re-render on it — needed when what changed
+    /// lives *outside* the snapshot values, like the default mascot or the menu
+    /// bar pin. The self-assignment is the re-emit; it is not a typo.
+    private func republish() {
         snapshots = snapshots
     }
 
@@ -196,5 +248,16 @@ final class UsageEngine: ObservableObject {
         if s < 10 { return "updated just now" }
         if s < 90 { return "updated \(s)s ago" }
         return "updated \(s / 60)m ago"
+    }
+}
+
+private extension String {
+    /// "Claude Work " → "claude-work"; anything non-alphanumeric becomes a dash.
+    var slugified: String {
+        lowercased()
+            .map { $0.isLetter || $0.isNumber ? String($0) : "-" }
+            .joined()
+            .split(separator: "-")
+            .joined(separator: "-")
     }
 }

@@ -11,6 +11,11 @@ typealias HourBuckets = [Int: [String: Int]] // hourEpoch -> family -> tokens
 enum TokenWindowEstimator {
     static let scanWindowDays = 35
 
+    /// At most this many weekly rows ("All models" + the first N-1 model families
+    /// alphabetically). The card lists every row it gets, so this caps a heavy
+    /// multi-model week from flooding the detail view with estimate bars.
+    static let maxWeeklyRows = 3
+
     struct SessionResult {
         var pct: Double
         var resetAt: Date?
@@ -107,11 +112,15 @@ enum TokenWindowEstimator {
                 resetText: weeklyCaption
             ))
         }
-        if weekly.count > 3 { weekly = Array(weekly.prefix(3)) }
+        if weekly.count > maxWeeklyRows { weekly = Array(weekly.prefix(maxWeeklyRows)) }
 
         return SessionResult(pct: sessionPct, resetAt: resetAt, weekly: weekly)
     }
 
+    /// Buckets a model id into a family for the per-family weekly rows. The list
+    /// is a hardcoded snapshot of Anthropic's family names — a new family lands
+    /// in "other" until it's added here, which only affects how estimate rows are
+    /// grouped, never the real API-reported limits.
     static func modelFamily(_ model: String) -> String {
         let lower = model.lowercased()
         for family in ["opus", "sonnet", "haiku", "fable"] where lower.contains(family) {
@@ -144,9 +153,11 @@ struct FileBucketCache: Codable {
             .timeIntervalSince1970
         pruned.entries = entries.filter { $0.value.mtime > cutoff }
 
-        try? FileManager.default.createDirectory(at: AppPaths.supportDir, withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(pruned) {
-            try? data.write(to: AppPaths.cacheFile)
+        do {
+            let data = try JSONEncoder().encode(pruned)
+            persist(data, to: AppPaths.cacheFile, what: "usage-cache.json")
+        } catch {
+            NSLog("Merlyn: failed to encode usage-cache.json: \(error.localizedDescription)")
         }
     }
 

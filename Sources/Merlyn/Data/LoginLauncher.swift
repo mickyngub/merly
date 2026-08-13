@@ -24,6 +24,18 @@ enum LoginLauncher {
         return NSWorkspace.shared.open(url)
     }
 
+    /// Removes sign-in scripts left in the temp dir by earlier launches. Called
+    /// once at startup: names are deterministic per provider id so only a handful
+    /// ever accumulate, but they shouldn't outlive the run that wrote them.
+    static func cleanupStaleScripts() {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory
+        guard let names = try? fm.contentsOfDirectory(atPath: tmp.path) else { return }
+        for name in names where name.hasPrefix("merlyn-signin-") && name.hasSuffix(".command") {
+            try? fm.removeItem(at: tmp.appendingPathComponent(name))
+        }
+    }
+
     private static func writeScript(for config: ProviderConfig) -> URL? {
         let slug = config.id.map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
         let url = FileManager.default.temporaryDirectory

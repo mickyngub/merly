@@ -4,6 +4,19 @@
 
 import AppKit
 
+/// The QA launch flags, parsed once. See CONTRIBUTING.md for what each drives;
+/// none of them exist for end users.
+enum QAFlags {
+    /// `--expand` pre-opens every provider card (visual QA without scripted clicks).
+    static let expandCards = CommandLine.arguments.contains("--expand")
+    /// Delay before routing an already-open panel to a QA screen: the SwiftUI
+    /// host must be mounted so its `openGeneration` onChange fires. Timing-based
+    /// because these are QA-only paths — a dropped route on a pathologically slow
+    /// first render costs a re-run, not a user.
+    static let mascotRouteDelay: TimeInterval = 0.6
+    static let railRouteDelay: TimeInterval = 1.0
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var engine: UsageEngine!
     private var panelController: PanelController!
@@ -16,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController = StatusItemController(engine: engine, panel: panelController)
         notificationManager = NotificationManager(engine: engine)
         enableLoginItemOnFirstLaunch()
+        LoginLauncher.cleanupStaleScripts()
         if CommandLine.arguments.contains("--light") {
             NSApp.appearance = NSAppearance(named: .aqua)
         }
@@ -24,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Defer so the SwiftUI host is mounted and its openGeneration
             // onChange can route to the mascot screen (same timing as --rail).
             panelController.open()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + QAFlags.mascotRouteDelay) { [weak self] in
                 self?.panelController.open(screen: .mascot)
             }
         } else if CommandLine.arguments.contains("--open") {
@@ -32,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if CommandLine.arguments.contains("--rail") {
             panelController.open()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + QAFlags.railRouteDelay) { [weak self] in
                 self?.panelController.collapseToRail()
             }
         }
@@ -64,7 +78,7 @@ func printSnapshots() {
     for provider in app.providers {
         let snap = reader(for: provider.kind).read(config: provider, app: app, ctx: &ctx, now: now)
         let reset = snap.sessionResetAt.map {
-            ProviderCardView.duration(until: $0, now: now)
+            UsageFormatting.duration(until: $0, now: now)
         } ?? "—"
         let kindNote = snap.failure.map { "no data — \($0.headline.lowercased())" }
             ?? (snap.isStale ? "reported (stale)" : snap.isEstimated ? "estimated" : "reported")

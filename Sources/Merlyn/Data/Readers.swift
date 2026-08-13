@@ -137,11 +137,33 @@ private func jsonlFiles(under root: URL, modifiedWithinDays days: Int) -> [Candi
     return out
 }
 
-private func forEachLine(of url: URL, _ body: (Substring) -> Void) {
-    guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
-          let text = String(data: data, encoding: .utf8)
-    else { return }
-    text.split(separator: "\n", omittingEmptySubsequences: true).forEach(body)
+/// Streams a file line by line in bounded chunks. Transcript trees hold files
+/// running to hundreds of MB, so materializing a whole file as one String (the
+/// obvious `Data(contentsOf:)` + split) spiked memory on every cache miss;
+/// this keeps the high-water mark at ~chunk size + the longest line.
+private func forEachLine(of url: URL, _ body: (String) -> Void) {
+    guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+    defer { try? handle.close() }
+    let chunkSize = 4 << 20 // 4 MiB
+    let newline: UInt8 = 0x0A
+
+    func emit(_ lineData: Data) {
+        guard !lineData.isEmpty, let line = String(data: lineData, encoding: .utf8) else { return }
+        body(line)
+    }
+
+    var buffer = Data()
+    while let chunk = try? handle.read(upToCount: chunkSize), !chunk.isEmpty {
+        buffer.append(chunk)
+        guard let lastNewline = buffer.lastIndex(of: newline) else { continue }
+        for lineData in buffer[..<lastNewline].split(separator: newline) {
+            emit(Data(lineData))
+        }
+        buffer = Data(buffer[buffer.index(after: lastNewline)...])
+    }
+    for lineData in buffer.split(separator: newline) {
+        emit(Data(lineData))
+    }
 }
 
 private let isoParser: ISO8601DateFormatter = {
@@ -159,8 +181,13 @@ private func hourEpoch(_ date: Date) -> Int {
     return t - t % 3600
 }
 
-let resetFormatter: DateFormatter = {
+/// Formats reset times for captions ("resets Mon 3:00 PM"). Locale pinned to
+/// en_US_POSIX because the app's strings are English (see CONTRIBUTING.md) and
+/// the output is persisted into cached readings — a locale change mid-cache
+/// would mix formats. Only ever touched from the engine's work queue.
+private let resetFormatter: DateFormatter = {
     let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
     f.dateFormat = "EEE h:mm a"
     return f
 }()
@@ -181,12 +208,29 @@ private func recentActivity(under root: URL, now: Date) -> Bool {
         .contains { now.timeIntervalSince($0.mtime) < activeThreshold }
 }
 
+/// Memoizes `computeGameStats` per log root. The sweep is stat-only but walks
+/// the provider's *entire* log tree (tens of thousands of files on a heavy
+/// install), which is too much to repeat on every 60s refresh — and the stats
+/// move on the scale of days, so a few minutes of staleness is invisible.
+/// Only ever touched from the engine's work queue (or the one-shot `--print`).
+private nonisolated(unsafe) var gameStatsCache: [String: (computedAt: Date, stats: GameStats?)] = [:]
+private let gameStatsInterval: TimeInterval = 10 * 60
+
 /// Whole-history metadata sweep → stateless idle-game stats. Sums log-file
 /// sizes (lifetime bytes, drives level + XP) and collects active local-calendar
 /// days from mtimes (drives the streak). Reads no file *contents* — just the
 /// `stat` metadata `jsonlFiles` already prefetches — so it stays cheap and
 /// monotonic. Returns nil when the log tree doesn't exist yet.
 func computeGameStats(root: URL, now: Date) -> GameStats? {
+    if let hit = gameStatsCache[root.path], now.timeIntervalSince(hit.computedAt) < gameStatsInterval {
+        return hit.stats
+    }
+    let stats = sweepGameStats(root: root, now: now)
+    gameStatsCache[root.path] = (now, stats)
+    return stats
+}
+
+private func sweepGameStats(root: URL, now: Date) -> GameStats? {
     guard FileManager.default.fileExists(atPath: root.path) else { return nil }
     // ~100y window = "all history": effectively no mtime cutoff.
     let files = jsonlFiles(under: root, modifiedWithinDays: 36_500)
@@ -198,6 +242,49 @@ func computeGameStats(root: URL, now: Date) -> GameStats? {
         days.insert(GameStats.dayIndex(f.mtime))
     }
     return GameStats.make(lifetimeBytes: bytes, activeDays: days, today: GameStats.dayIndex(now))
+}
+
+/// Shared local-token estimation for transcript-style providers (Claude, Kimi):
+/// scan recent jsonl files under `root`, merge per-file hour buckets through the
+/// parse cache, and evaluate session/weekly percentages against the historical
+/// peak (see `TokenWindowEstimator`). The per-provider differences — which files
+/// count, how a line parses, how the weekly rows are labeled — ride in as
+/// parameters, so a new estimated provider is a parse function plus this call.
+private func estimateSnapshot(
+    config: ProviderConfig, app: AppConfig, cache: inout FileBucketCache,
+    now: Date, root: URL,
+    historyNoun: String,
+    fileFilter: (CandidateFile) -> Bool = { _ in true },
+    parse: (URL) -> HourBuckets,
+    sessionWindowSeconds: Double? = nil,
+    mapWeekly: ([WeeklyMetric]) -> [WeeklyMetric] = { $0 }
+) -> ProviderSnapshot {
+    guard FileManager.default.fileExists(atPath: root.path) else {
+        return .empty(config, note: "No \(historyNoun) yet in \(config.dir)")
+    }
+    let files = jsonlFiles(under: root, modifiedWithinDays: TokenWindowEstimator.scanWindowDays)
+        .filter(fileFilter)
+    guard !files.isEmpty else {
+        return .empty(config, note: "No recent activity in \(config.dir)")
+    }
+
+    var merged: HourBuckets = [:]
+    for file in files {
+        let buckets = cache.buckets(for: file.url, mtime: file.mtime, size: file.size, parse: parse)
+        mergeBuckets(&merged, buckets)
+    }
+
+    let result = TokenWindowEstimator.evaluate(
+        buckets: merged, now: now, sessionHours: app.sessionHours,
+        sessionLimitOverride: config.sessionTokenLimit,
+        weeklyLimitOverride: config.weeklyTokenLimit
+    )
+    let active = files.contains { now.timeIntervalSince($0.mtime) < activeThreshold }
+    return ProviderSnapshot(
+        config: config, sessionPct: result.pct, sessionResetAt: result.resetAt,
+        weekly: mapWeekly(result.weekly), isActive: active, isEstimated: true,
+        sessionWindowSeconds: sessionWindowSeconds, note: nil
+    )
 }
 
 // MARK: - Claude
@@ -228,7 +315,7 @@ struct ClaudeReader: UsageReader {
                 config: config,
                 sessionPct: usage.fiveHour?.usedPct ?? 0,
                 sessionResetAt: sessionReset(usage.fiveHour),
-                weekly: weekly,
+                weekly: WeeklyMetric.dedupingLabels(weekly),
                 isActive: recentActivity(under: projectsRoot, now: now),
                 isEstimated: false,
                 sessionWindowSeconds: usage.fiveHour?.windowSeconds,
@@ -247,41 +334,14 @@ struct ClaudeReader: UsageReader {
                 failed.plan = ClaudeUsageAPI.planLabel(configDir: config.expandedDir)
                 return failed
             }
-            return estimate(config: config, app: app, cache: &fileCache, now: now, root: projectsRoot)
+            return estimateSnapshot(
+                config: config, app: app, cache: &fileCache, now: now, root: projectsRoot,
+                historyNoun: "transcripts", parse: Self.parse,
+                sessionWindowSeconds: app.sessionHours * 3600
+            )
         })
         snap.game = computeGameStats(root: projectsRoot, now: now)
         return snap
-    }
-
-    private func estimate(
-        config: ProviderConfig, app: AppConfig,
-        cache: inout FileBucketCache, now: Date, root: URL
-    ) -> ProviderSnapshot {
-        guard FileManager.default.fileExists(atPath: root.path) else {
-            return .empty(config, note: "No transcripts yet in \(config.dir)")
-        }
-        let files = jsonlFiles(under: root, modifiedWithinDays: TokenWindowEstimator.scanWindowDays)
-        guard !files.isEmpty else {
-            return .empty(config, note: "No recent activity in \(config.dir)")
-        }
-
-        var merged: HourBuckets = [:]
-        for file in files {
-            let buckets = cache.buckets(for: file.url, mtime: file.mtime, size: file.size, parse: Self.parse)
-            mergeBuckets(&merged, buckets)
-        }
-
-        let result = TokenWindowEstimator.evaluate(
-            buckets: merged, now: now, sessionHours: app.sessionHours,
-            sessionLimitOverride: config.sessionTokenLimit,
-            weeklyLimitOverride: config.weeklyTokenLimit
-        )
-        let active = files.contains { now.timeIntervalSince($0.mtime) < activeThreshold }
-        return ProviderSnapshot(
-            config: config, sessionPct: result.pct, sessionResetAt: result.resetAt,
-            weekly: result.weekly, isActive: active, isEstimated: true,
-            sessionWindowSeconds: app.sessionHours * 3600, note: nil
-        )
     }
 
     /// Parses one Claude Code transcript. Assistant messages repeat when streamed,
@@ -364,7 +424,7 @@ struct CodexReader: UsageReader {
                 config: config,
                 sessionPct: usage.primary?.usedPct ?? 0,
                 sessionResetAt: sessionReset(usage.primary),
-                weekly: Array(weekly.prefix(4)),
+                weekly: WeeklyMetric.dedupingLabels(Array(weekly.prefix(4))),
                 isActive: recentActivity(under: sessionsRoot, now: now),
                 isEstimated: false,
                 sessionWindowSeconds: usage.primary?.windowSeconds,
@@ -396,12 +456,16 @@ struct CodexReader: UsageReader {
             .sorted { $0.mtime > $1.mtime }
         guard !files.isEmpty else { return nil }
 
-        // Newest rate_limits event across the most recent rollouts wins.
+        // Files are newest-mtime-first, so the first file that holds any
+        // rate_limits event wins — its mtime bounds every event inside it, making
+        // it at least as fresh as anything an older file could hold. The prefix
+        // caps the tail-reads when many recent rollouts carry no limits at all.
         var best: (date: Date, limits: [String: Any])?
         for file in files.prefix(12) {
-            guard let found = Self.lastRateLimits(in: file.url) else { continue }
-            if best == nil || found.date > best!.date { best = found }
-            if best != nil { break } // files are mtime-sorted; first hit is the newest
+            if let found = Self.lastRateLimits(in: file.url) {
+                best = found
+                break
+            }
         }
         guard let (eventDate, limits) = best else { return nil }
 
@@ -503,7 +567,7 @@ struct KimiReader: UsageReader {
                 config: config,
                 sessionPct: session?.usedPct ?? 0,
                 sessionResetAt: sessionReset(session),
-                weekly: weekly,
+                weekly: WeeklyMetric.dedupingLabels(weekly),
                 isActive: recentActivity(under: sessionsRoot, now: now),
                 isEstimated: false,
                 sessionWindowSeconds: session?.windowSeconds,
@@ -514,44 +578,20 @@ struct KimiReader: UsageReader {
             // never a stand-in for an account whose quota we've been told we can't
             // read (see `failureSnapshot`).
             if let failed = failureSnapshot(error, config: config) { return failed }
-            return estimate(config: config, app: app, cache: &fileCache, now: now, root: sessionsRoot)
+            return estimateSnapshot(
+                config: config, app: app, cache: &fileCache, now: now, root: sessionsRoot,
+                historyNoun: "sessions",
+                fileFilter: { $0.url.lastPathComponent == "wire.jsonl" },
+                parse: Self.parse,
+                // Kimi logs don't split by model; keep just the aggregate row.
+                mapWeekly: { weekly in
+                    weekly.filter { $0.label == "All models" }
+                        .map { WeeklyMetric(label: "Weekly", pct: $0.pct, resetText: $0.resetText) }
+                }
+            )
         })
         snap.game = computeGameStats(root: sessionsRoot, now: now)
         return snap
-    }
-
-    private func estimate(
-        config: ProviderConfig, app: AppConfig,
-        cache: inout FileBucketCache, now: Date, root: URL
-    ) -> ProviderSnapshot {
-        guard FileManager.default.fileExists(atPath: root.path) else {
-            return .empty(config, note: "No sessions yet in \(config.dir)")
-        }
-        let files = jsonlFiles(under: root, modifiedWithinDays: TokenWindowEstimator.scanWindowDays)
-            .filter { $0.url.lastPathComponent == "wire.jsonl" }
-        guard !files.isEmpty else {
-            return .empty(config, note: "No recent activity in \(config.dir)")
-        }
-
-        var merged: HourBuckets = [:]
-        for file in files {
-            let buckets = cache.buckets(for: file.url, mtime: file.mtime, size: file.size, parse: Self.parse)
-            mergeBuckets(&merged, buckets)
-        }
-
-        let result = TokenWindowEstimator.evaluate(
-            buckets: merged, now: now, sessionHours: app.sessionHours,
-            sessionLimitOverride: config.sessionTokenLimit,
-            weeklyLimitOverride: config.weeklyTokenLimit
-        )
-        let active = files.contains { now.timeIntervalSince($0.mtime) < activeThreshold }
-        // Kimi logs don't split by model; keep just the aggregate row.
-        let weekly = result.weekly.filter { $0.label == "All models" }
-            .map { WeeklyMetric(label: "Weekly", pct: $0.pct, resetText: $0.resetText) }
-        return ProviderSnapshot(
-            config: config, sessionPct: result.pct, sessionResetAt: result.resetAt,
-            weekly: weekly, isActive: active, isEstimated: true, note: nil
-        )
     }
 
     /// Parses a Kimi wire.jsonl: step.end loop events carry usage + epoch-ms time.
@@ -577,13 +617,5 @@ struct KimiReader: UsageReader {
             buckets[hour, default: [:]]["all", default: 0] += tokens
         }
         return buckets
-    }
-}
-
-func reader(for kind: ProviderKind) -> UsageReader {
-    switch kind {
-    case .claude: ClaudeReader()
-    case .codex: CodexReader()
-    case .kimi: KimiReader()
     }
 }
