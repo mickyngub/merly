@@ -18,8 +18,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# No tagged releases (source-only distribution, see SECURITY.md), so the
+# marketing version stays 1.0 and the build number is the commit count —
+# monotonic, numeric (CFBundleVersion must be), and mappable back to the
+# commit a bug report came from via `git log`.
 VERSION="${MERLYN_VERSION:-1.0}"
-BUILD="${MERLYN_BUILD:-1}"
+BUILD="${MERLYN_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 COPYRIGHT="© 2026 Pichaya Puttekulangkura. MIT Licensed."
 
 swift build -c release

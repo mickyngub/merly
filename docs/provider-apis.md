@@ -23,4 +23,4 @@ How Merlyn gets real, provider-reported rate limits for each agent CLI. Everythi
   "Claude Code-credentials-" + hex(sha256(absoluteConfigDirPath))[0..8]
   ```
 
-  Verified on the author's machine: `sha256(<absolute path of ~/.claude-work>)[:8] = ed92d010`, matching the real keychain item. The hex is machine-specific — it hashes the absolute config-dir path.
+  The hex is machine-specific — it hashes the *absolute* config-dir path, so the same `~/.claude-work` yields a different suffix per user. Verify yours with `echo -n "$HOME/.claude-work" | shasum -a 256 | cut -c1-8` against Keychain Access. (Covered by `testKeychainServiceNames` in the test suite.)

@@ -199,10 +199,10 @@ Overridable like the CLI: `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST` (default `h
 
 If it's Claude-Code / Codex / Kimi-compatible, just add an entry to `~/Library/Application Support/Merlyn/providers.json` (`kind`, `dir`, `style`, `palette`) — no code. For a genuinely new backend:
 
-1. Add a case to `ProviderKind` (`Models.swift`).
+1. Add a case to `ProviderKind` plus its `ProviderDescriptor` (`ProviderKind.swift`) — the descriptor is the one-stop fact table (name, default dir, login command, sprite family, lane hue, reader factory) every other switch derives from.
 2. Add a `<Name>UsageAPI` enum to `ProviderAPI.swift` returning windows + plan label.
-3. Add a `<Name>Reader: UsageReader` to `Readers.swift` (API-first, file fallback), and wire it in `reader(for:)`.
-4. Pick a `MascotStyle` silhouette and a `MascotPalette` preset (or add one).
+3. Add a `<Name>Reader: UsageReader` to `Readers.swift` (API-first, file fallback) — the descriptor's `makeReader` wires it up; there is no separate switch to touch.
+4. Add an entry to `AppConfig.knownProviders` (with on-disk markers) so first-run auto-detection finds it, plus a bundled sprite sheet for its `spriteFamily`.
 
 ## Re-deriving from the CLIs
 

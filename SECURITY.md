@@ -83,4 +83,6 @@ before any public disclosure.
 
 ## Supported versions
 
-Only the latest released version receives security fixes.
+Merlyn is source-distributed with no tagged releases: only the latest `main`
+receives security fixes. Rebuild with `scripts/install.sh --update` to pick
+them up.

@@ -40,6 +40,19 @@ open build/Merlyn.app
 exercises the whole data path without launching any UI. Please run it before
 opening a PR.
 
+## Tests
+
+```sh
+swift test
+```
+
+The suite (`Tests/MerlynTests/`) covers the pure logic: the token-window
+estimator, snapshot lane/gauge derivation, payload parsing against fixture
+transcripts, and the config store's corrupt-file quarantine. It uses XCTest,
+which ships with **Xcode** — on a Command Line Tools-only machine `swift test`
+fails with "no such module 'XCTest'"; `swift build` and `--print` still work,
+and CI runs the tests on every pull request.
+
 ## Project layout
 
 | Path | What lives there |
@@ -83,6 +96,7 @@ refactor · `:memo:` docs · `:art:` structure/format · `:fire:` remove code.
 Before opening a PR, please make sure:
 
 - [ ] `swift build` succeeds with no new warnings.
+- [ ] `swift test` passes (or let CI run it if you're on Command Line Tools only).
 - [ ] `.build/debug/Merlyn --print` runs without crashing.
 - [ ] No secrets, tokens, or personal paths are added (the app reads
       credentials — never hardcode or log any).
@@ -92,11 +106,21 @@ Before opening a PR, please make sure:
 
 Keep PRs focused. Describe what changed and how you verified it.
 
+## Localization
+
+Merlyn is deliberately **English-only** for now: all user-facing strings are
+inline literals, and date formatting is pinned to `en_US_POSIX` (formatted
+strings are persisted into cached readings, so a mid-cache locale change would
+mix formats). If you're adding strings, keep them inline — please don't
+introduce `String(localized:)` or `.strings` catalogs piecemeal; localization
+would be adopted repo-wide in one pass if it ever lands.
+
 ## Releasing (maintainers)
 
 Merlyn ships as source; there are no release artifacts to publish. How the app
 bundle is assembled and ad-hoc signed — and what changing that would take — is
 documented in [`docs/specs/distribution.md`](docs/specs/distribution.md).
 
-CI (`.github/workflows/ci.yml`) is manual-only: `gh workflow run ci.yml`, or the
-Actions tab. Run it when you want proof a clean machine can build the app.
+CI (`.github/workflows/ci.yml`) builds and tests every pull request, and can be
+run manually (`gh workflow run ci.yml`, or the Actions tab) for proof a clean
+machine can build the app.
