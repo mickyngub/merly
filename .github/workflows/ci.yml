@@ -1,11 +1,12 @@
 name: CI
 
-# Manual only — run it from the Actions tab, or `gh workflow run ci.yml`.
-# Deliberately not on push/pull_request: this repo is distributed as source that
-# every user builds themselves, so a green run here proves nothing a contributor's
-# own `swift build` doesn't already tell them. It stays available for checking a
-# clean-machine build before announcing a change.
+# Runs on pull requests (cheap insurance against a broken merge) and on demand
+# from the Actions tab / `gh workflow run ci.yml`. Not on push: this repo is
+# distributed as source that every user builds themselves, so a green run on
+# main proves nothing a contributor's own `swift build` doesn't already tell
+# them — but a PR gate catches breakage *before* it lands.
 on:
+  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -14,7 +15,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build (macOS 14)
+    name: Build & test (macOS 14)
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +25,9 @@ jobs:
 
       - name: Build (debug)
         run: swift build
+
+      - name: Test
+        run: swift test
 
       - name: Build (release)
         run: swift build -c release
