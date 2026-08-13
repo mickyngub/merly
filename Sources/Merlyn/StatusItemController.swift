@@ -78,22 +78,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let descriptor = base.fontDescriptor.withDesign(.rounded) else { return base }
         return NSFont(descriptor: descriptor, size: 6) ?? base
     }()
-    private var animTimer: Timer?
-    private var animFrame = 0
-    /// The reported provider's look and gauges, captured for the animation timer.
+    /// The reported provider's look and gauges, captured for the animation clock.
     private var current: (
         sprite: String?, style: MascotStyle, palette: MascotPalette, mood: Mood,
+        /// Identity on the shared clock — the provider's config id, so this critter
+        /// idles and flourishes in step with its own card in the panel.
+        key: String,
         /// The 5h window and the weekly cap, in that order — see `iconGauges`. Each
         /// lane carries the card's colour for that limit, not this account's mascot
         /// hue, so a window is the same hue here as in the panel.
         gauges: [IconGauge],
         failure: ProviderFailure?
     )?
-
-    /// Short off-mood expression borrowed from another sheet row, so the menu
-    /// bar critter uses the whole 4×4 range instead of idling on one row.
-    private var emote: (row: Int, ticksLeft: Int)?
-    private var ticksUntilEmote = Int.random(in: 25...60)
 
     init(engine: UsageEngine, panel: PanelController) {
         self.engine = engine
@@ -119,7 +115,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             .sink { [weak self] snapshots in self?.update(with: snapshots) }
             .store(in: &cancellables)
         update(with: engine.snapshots)
-        startAnimation()
+
+        // Same clock the panel's mascots read, so the critter up here and the one
+        // on its card are on the same frame and the same flourish.
+        MascotAnimator.shared.$frame
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.renderFrame() } }
+            .store(in: &cancellables)
     }
 
     private func update(with snapshots: [ProviderSnapshot]) {
@@ -146,8 +147,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             ? reported!.mood
             : (reported.map { $0.isUnavailable ? .happy : $0.mood } ?? .happy)
 
-        if mood != current?.mood { emote = nil } // real data beats a flourish
-        current = (sprite, style, palette, mood, reported?.iconGauges ?? [], reported?.failure)
+        // Keyed on the provider so the panel card for the same account shares this
+        // critter's flourishes; the app's mascot has its own key for when there is
+        // no provider to wear.
+        let key = reported?.id ?? MascotAnimator.appKey
+        MascotAnimator.shared.register(key, moodRow: mood.spriteRow, animates: mood != .dead)
+        current = (sprite, style, palette, mood, key,
+                   reported?.iconGauges ?? [], reported?.failure)
         button.toolTip = Self.tooltip(for: reported, pinned: config.menuBarProviderId != nil)
         renderFrame()
     }
@@ -160,45 +166,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return snapshot.gaugeTooltip(qualifier: pinned ? "" : " (busiest provider)")
     }
 
-    /// Animate the peak mascot at ~5 fps, matching the panel.
-    private func startAnimation() {
-        animTimer?.invalidate()
-        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        animTimer = timer
-    }
-
-    /// One animation tick: advance the idle frame, and every ~5–12s play a
-    /// brief (0.8–1.6s) expression from one of the other mood rows.
-    private func tick() {
-        animFrame = (animFrame + 1) % 4
-        if var e = emote {
-            e.ticksLeft -= 1
-            if e.ticksLeft <= 0 {
-                emote = nil
-                ticksUntilEmote = Int.random(in: 25...60)
-            } else {
-                emote = e
-            }
-        } else {
-            ticksUntilEmote -= 1
-            if ticksUntilEmote <= 0, let cur = current,
-               let row = [0, 1, 2, 3, 6, 7].filter({ $0 != cur.mood.spriteRow }).randomElement() {
-                emote = (row, Int.random(in: 4...8))
-            }
-        }
-        renderFrame()
-    }
-
+    /// Draw the item at the shared clock's current frame: the mood row, or the
+    /// brief off-mood flourish playing over it (see `MascotAnimator`).
     private func renderFrame() {
         guard let button = statusItem.button, let cur = current else { return }
-        let row = emote?.row ?? cur.mood.spriteRow
+        let animator = MascotAnimator.shared
+        let row = animator.emote(for: cur.key) ?? cur.mood.spriteRow
         let mascot: NSImage
         if let name = cur.sprite,
            let cg = SpriteSheetStore.recoloredFrame(
-               name: name, row: row, col: animFrame, accentHex: cur.palette.B
+               name: name, row: row, col: animator.column(for: cur.key), accentHex: cur.palette.B
            ) {
             mascot = NSImage(cgImage: cg, size: NSSize(width: iconPoints, height: iconPoints))
             mascot.isTemplate = false

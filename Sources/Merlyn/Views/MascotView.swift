@@ -13,11 +13,18 @@ struct MascotView: View {
     var hopsOnHover: Bool = true
     /// When set and loadable, renders this 4×4 sprite sheet instead of the drawn critter.
     var spriteName: String? = nil
+    /// Identity for the shared animation clock — a provider's config id, or
+    /// `MascotAnimator.appKey` for the app's own critter. Keyed mascots idle *and*
+    /// flourish in lockstep with every other surface drawing the same key (the menu
+    /// bar, the collapsed rail). Leave nil for previews: they idle, but never wander
+    /// off the mood they were asked to show.
+    var animationKey: String? = nil
 
     @State private var blink = false
     @State private var bobUp = false
     @State private var hopTrigger = 0
     @State private var frameIndex = 0
+    @State private var emoteRow: Int? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var sheet: SpriteSheet? {
@@ -81,19 +88,33 @@ struct MascotView: View {
                     blink = false
                 }
             }
-            .task(id: spriteName ?? "") {
-                // cycle the 4 idle frames of the current mood row (~5 fps)
-                guard sheet != nil, !reduceMotion else { return }
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(200))
-                    guard !Task.isCancelled else { return }
-                    frameIndex = (frameIndex + 1) % 4
-                }
+            .onAppear { registerWithClock() }
+            .onChange(of: mood) { _, _ in registerWithClock() }
+            .onChange(of: animationKey) { _, _ in registerWithClock() }
+            .onReceive(MascotAnimator.shared.$frame) { _ in
+                // The idle cycle lives in the sheet's columns, so the drawn critter
+                // takes only the flourish — it has no frames of its own to advance.
+                // (Reduce Motion is handled by the clock, which simply stops ticking.)
+                if sheet != nil { frameIndex = MascotAnimator.shared.column(for: animationKey) }
+                emoteRow = MascotAnimator.shared.emote(for: animationKey)
             }
+    }
+
+    /// Keep the shared clock's idea of this critter current, so its flourishes are
+    /// picked against the mood it is actually wearing.
+    private func registerWithClock() {
+        guard let animationKey else { return }
+        MascotAnimator.shared.register(animationKey, moodRow: mood.spriteRow,
+                                       animates: mood != .dead)
     }
 
     private var bobActive: Bool { bob && !reduceMotion && mood != .dead }
     private var taskKey: String { "\(style.rawValue)-\(mood.rawValue)" }
+
+    /// The row on screen: the mood, or the flourish borrowed over it. `.dead` is
+    /// frozen by the clock, so it never emotes.
+    private var displayRow: Int { emoteRow ?? mood.spriteRow }
+    private var displayMood: Mood { emoteRow.map(Mood.fromRow) ?? mood }
 
     @ViewBuilder private var content: some View {
         spriteContent
@@ -106,7 +127,7 @@ struct MascotView: View {
     @ViewBuilder private var spriteContent: some View {
         if let spriteName, sheet != nil,
            let cg = SpriteSheetStore.recoloredFrame(
-               name: spriteName, row: mood.spriteRow,
+               name: spriteName, row: displayRow,
                col: mood == .dead ? 0 : frameIndex, // freeze the frame when offline
                accentHex: palette.B
            ) {
@@ -121,7 +142,7 @@ struct MascotView: View {
 
     private var sprite: some View {
         Canvas(opaque: false, rendersAsynchronously: false) { ctx, size in
-            let grid = SpriteBuilder.build(style: style, mood: mood, blink: blink)
+            let grid = SpriteBuilder.build(style: style, mood: displayMood, blink: blink)
             let cell = size.width / 16
             for y in 0..<16 {
                 for x in 0..<16 {

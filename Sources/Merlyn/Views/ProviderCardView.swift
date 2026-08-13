@@ -93,7 +93,8 @@ struct ProviderCardView: View {
                         mood: snapshot.mood,
                         px: 48,
                         busy: snapshot.isActive,
-                        spriteName: snapshot.resolvedSpriteForm
+                        spriteName: snapshot.resolvedSpriteForm,
+                        animationKey: snapshot.id
                     )
                 }
                 .frame(width: 48, height: 48)

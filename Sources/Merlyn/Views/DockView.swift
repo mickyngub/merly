@@ -108,7 +108,8 @@ struct DockView: View {
             palette: mascot.resolvedPalette,
             mood: peak.map { $0.isUnavailable ? .happy : $0.mood } ?? .happy,
             px: 26,
-            spriteName: mascot.resolvedSprite
+            spriteName: mascot.resolvedSprite,
+            animationKey: MascotAnimator.appKey
         )
         .frame(width: 26, height: 26)
         .overlay(alignment: .topLeading) {
@@ -364,7 +365,8 @@ struct RailView: View {
                 px: Self.mascotPx,
                 bob: false,
                 hopsOnHover: false,
-                spriteName: snapshot.config.resolvedSprite
+                spriteName: snapshot.config.resolvedSprite,
+                animationKey: snapshot.id
             )
             .frame(width: Self.mascotPx, height: Self.mascotPx)
             .overlay(alignment: .bottomTrailing) {
