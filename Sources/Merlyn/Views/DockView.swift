@@ -4,6 +4,26 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Which screen the dock body shows. One value, so two screens can never be on
+/// at once — the old five independent booleans had to be zeroed in four places,
+/// and one missed reset stacked two screens.
+enum DockScreen: Equatable {
+    /// The provider list, with its inline mode.
+    case list(ListMode)
+    case settings
+    case mascot
+
+    enum ListMode: Equatable {
+        case browsing
+        /// Reorder/delete mode (the slider button in the header).
+        case editing
+        /// The inline add form is open in place of the dashed add card.
+        case adding
+        /// The inline edit form replaces this provider's card.
+        case editingProvider(String)
+    }
+}
+
 struct DockView: View {
     @ObservedObject var engine: UsageEngine
     /// Bumped every time the panel opens, retriggering the entrance stagger.
@@ -12,30 +32,35 @@ struct DockView: View {
     let initialScreen: PanelScreen
 
     @State private var refreshSpin = 0.0
-    @State private var addingProvider = false
-    @State private var editing = false
-    @State private var showingSettings = false
-    @State private var showingMascot = false
-    @State private var editingProviderId: String?
+    @State private var screen: DockScreen = .list(.browsing)
     @State private var draggingId: String?
     @Environment(\.theme) private var theme
+
+    /// The list's inline mode, or nil when another screen is up.
+    private var listMode: DockScreen.ListMode? {
+        if case .list(let mode) = screen { return mode }
+        return nil
+    }
+
+    private var isEditing: Bool { listMode == .editing }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 9) {
-                    if showingMascot {
+                    switch screen {
+                    case .mascot:
                         MascotEditorView(engine: engine) {
-                            withAnimation(Theme.snappy(0.4)) { showingMascot = false }
+                            withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
                         }
                         .entrance(index: 0, generation: openGeneration)
-                    } else if showingSettings {
+                    case .settings:
                         SettingsView(engine: engine) {
-                            withAnimation(Theme.snappy(0.4)) { showingSettings = false }
+                            withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
                         }
                         .entrance(index: 0, generation: openGeneration)
-                    } else {
+                    case .list:
                         providerList
                     }
                 }
@@ -49,45 +74,41 @@ struct DockView: View {
             }
         }
         .onChange(of: openGeneration) { _, _ in
-            addingProvider = false
-            editing = false
-            showingSettings = false
-            editingProviderId = nil
-            showingMascot = initialScreen == .mascot
+            screen = initialScreen == .mascot ? .mascot : .list(.browsing)
         }
     }
 
     @ViewBuilder
     private var providerList: some View {
         ForEach(Array(engine.snapshots.enumerated()), id: \.element.id) { index, snapshot in
-            if editingProviderId == snapshot.id {
+            if listMode == .editingProvider(snapshot.id) {
                 AddProviderForm(engine: engine, editing: snapshot.config) {
-                    withAnimation(Theme.snappy(0.4)) { editingProviderId = nil }
+                    withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
                 }
                 .entrance(index: index, generation: openGeneration)
             } else {
                 ProviderCardView(
                     snapshot: snapshot,
-                    editing: editing,
-                    onEdit: { withAnimation(Theme.snappy(0.4)) { editingProviderId = snapshot.id } },
+                    editing: isEditing,
+                    onEdit: { withAnimation(Theme.snappy(0.4)) { screen = .list(.editingProvider(snapshot.id)) } },
                     onDelete: { withAnimation(Theme.snappy(0.4)) { engine.removeProvider(snapshot.id) } }
                 )
                 .opacity(draggingId == snapshot.id ? 0.4 : 1)
-                .reorderable(active: editing, id: snapshot.id, draggingId: $draggingId) { dragged, target in
+                .reorderable(active: isEditing, id: snapshot.id, draggingId: $draggingId) { dragged, target in
                     withAnimation(Theme.snappy(0.3)) { engine.moveProvider(dragged, toIndexOf: target) }
                 }
                 .entrance(index: index, generation: openGeneration)
             }
         }
-        if !editing {
+        if !isEditing {
             Group {
-                if addingProvider {
+                if listMode == .adding {
                     AddProviderForm(engine: engine) {
-                        withAnimation(Theme.snappy(0.4)) { addingProvider = false }
+                        withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
                     }
                 } else {
                     AddProviderCard {
-                        withAnimation(Theme.snappy(0.4)) { addingProvider = true }
+                        withAnimation(Theme.snappy(0.4)) { screen = .list(.adding) }
                     }
                 }
             }
@@ -103,35 +124,34 @@ struct DockView: View {
     private var titleMascot: some View {
         let mascot = engine.appConfig.defaultMascotConfig
         let peak = engine.snapshots.max { $0.pressurePct < $1.pressurePct }
-        return MascotView(
-            style: mascot.style,
-            palette: mascot.resolvedPalette,
-            mood: peak.map { $0.isUnavailable ? .happy : $0.mood } ?? .happy,
-            px: 26,
-            spriteName: mascot.resolvedSprite,
-            animationKey: MascotAnimator.appKey
-        )
-        .frame(width: 26, height: 26)
-        .overlay(alignment: .topLeading) {
-            if mascot.isShiny {
-                ShinySparkle().help("Shiny! A rare mascot color.")
+        // A Button rather than a bare tap gesture so keyboard and VoiceOver users
+        // can reach the editor too.
+        return Button {
+            withAnimation(Theme.snappy(0.4)) { screen = .mascot }
+        } label: {
+            MascotView(
+                style: mascot.style,
+                palette: mascot.resolvedPalette,
+                mood: peak.map { $0.isUnavailable ? .happy : $0.mood } ?? .happy,
+                px: 26,
+                spriteName: mascot.resolvedSprite,
+                animationKey: MascotAnimator.appKey
+            )
+            .frame(width: 26, height: 26)
+            .overlay(alignment: .topLeading) {
+                if mascot.isShiny {
+                    ShinySparkle().help("Shiny! A rare mascot color.")
+                }
             }
         }
-        .onTapGesture {
-            withAnimation(Theme.snappy(0.4)) {
-                showingMascot = true
-                showingSettings = false
-                editing = false
-                addingProvider = false
-                editingProviderId = nil
-            }
-        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Edit the Merlyn mascot")
         .help("Merlyn — click to edit the mascot")
     }
 
     private var header: some View {
         HStack(spacing: 10) {
-            if !showingMascot {
+            if screen != .mascot {
                 titleMascot
             }
             VStack(alignment: .leading, spacing: 1) {
@@ -146,22 +166,20 @@ struct DockView: View {
                 }
             }
             Spacer()
-            if !showingSettings, !showingMascot, !engine.snapshots.isEmpty {
-                IconButton(systemName: editing ? "checkmark" : "slider.horizontal.3") {
+            if listMode != nil, !engine.snapshots.isEmpty {
+                IconButton(systemName: isEditing ? "checkmark" : "slider.horizontal.3") {
                     withAnimation(Theme.snappy(0.3)) {
-                        editing.toggle()
-                        if editing { addingProvider = false; editingProviderId = nil }
+                        screen = .list(isEditing ? .browsing : .editing)
                     }
                 }
-                .help(editing ? "Done editing" : "Edit providers")
+                .help(isEditing ? "Done editing" : "Edit providers")
             }
-            IconButton(systemName: showingSettings ? "checkmark" : "gearshape") {
+            IconButton(systemName: screen == .settings ? "checkmark" : "gearshape") {
                 withAnimation(Theme.snappy(0.3)) {
-                    showingSettings.toggle()
-                    if showingSettings { editing = false; addingProvider = false; editingProviderId = nil; showingMascot = false }
+                    screen = screen == .settings ? .list(.browsing) : .settings
                 }
             }
-            .help(showingSettings ? "Done" : "Settings")
+            .help(screen == .settings ? "Done" : "Settings")
             IconButton(systemName: "arrow.clockwise") {
                 withAnimation(.easeInOut(duration: 0.6)) { refreshSpin += 360 }
                 // A deliberate click forces past the 429 cooldown so it always
@@ -346,6 +364,11 @@ struct RailView: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onExpand)
         .onHover { hovering = $0 }
+        // The whole rail is one click target, so it presents as one button.
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Open the Merlyn usage panel")
+        .accessibilityAction { onExpand() }
         .help("Open usage")
     }
 
@@ -376,6 +399,9 @@ struct RailView: View {
             }
             gauge(snapshot)
         }
+        // Deliberately the *rail's* hover, not this item's: the whole rail is one
+        // click target ("expand me"), so every critter leans in together. Per-item
+        // hover would suggest the mascots are individually clickable — they aren't.
         .scaleEffect(hovering ? 1.08 : 1)
         .animation(.easeOut(duration: 0.2), value: hovering)
         .help(snapshot.gaugeTooltip())

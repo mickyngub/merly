@@ -51,7 +51,7 @@ final class MascotAnimator: ObservableObject {
 
     /// Rows a flourish may borrow — including wink (6) and curious (7), which
     /// exist for this and nothing else. Sleeping (4) and excited (5) are states,
-    /// not flourishes. See docs/sprite-sheet-spec.html.
+    /// not flourishes. See docs/specs/sprite-sheet-spec.html.
     private static let emotePool = [0, 1, 2, 3, 6, 7]
 
     private init() {
@@ -135,4 +135,10 @@ final class MascotAnimator: ObservableObject {
 
     /// Ticks between flourishes: 5–12s.
     private static func emoteDelay() -> Int { Int.random(in: 25...60) }
+
+    deinit {
+        // App-lifetime singleton in practice; invalidated for hygiene so a future
+        // non-singleton use can't leak the run-loop timer.
+        timer?.invalidate()
+    }
 }

@@ -60,6 +60,18 @@ struct RingView: View {
         // Anchored trailing so a long label ("GPT-5.3-Codex-Spark · 5h") grows left
         // across the card instead of off its right edge.
         .overlay(alignment: .bottomTrailing) { tooltip }
+        // The figures are otherwise hover-only; narrate every lane for VoiceOver.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    /// "Weekly 62%, 5h 31%" — the hover tooltips, rolled into one sentence.
+    private var accessibilitySummary: String {
+        guard !lanes.isEmpty else { return "No usage data" }
+        let readings = lanes
+            .map { "\($0.id) \(Int($0.pct.rounded()))%\(estimated ? " estimated" : "")" }
+            .joined(separator: ", ")
+        return "Usage: \(readings)"
     }
 
     private func lane(_ limit: RingLimit, index: Int) -> some View {

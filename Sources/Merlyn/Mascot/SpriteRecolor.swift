@@ -8,6 +8,11 @@
 
 import CoreGraphics
 
+/// `@MainActor` because the memo cache is unsynchronized shared state and both
+/// renderers (`MascotView`, `StatusItemController`) already call from the main
+/// thread. The cache is unbounded but effectively capped by the art: entries are
+/// keyed (sheet, row, col, accent), and all of those are small finite sets.
+@MainActor
 enum SpriteRecolor {
     /// Duotone endpoints, blending the accent toward black (shadows) and white
     /// (highlights). Tuned so Clawd's near-black eyes stay crisp while a mostly

@@ -11,10 +11,16 @@ enum Mood: String, Comparable {
     /// the baked sheets have no dead row of their own.
     case dead
 
+    /// Mood breakpoints below the danger line. `.stressed` deliberately shares
+    /// `UsageThresholds.dangerPct` so the critter frets at exactly the moment the
+    /// gauges go red — two surfaces disagreeing about "how bad" reads as a bug.
+    static let tiredPct: Double = 66
+    static let contentPct: Double = 40
+
     static func from(pct: Double) -> Mood {
-        if pct >= 88 { return .stressed }
-        if pct >= 66 { return .tired }
-        if pct >= 40 { return .content }
+        if pct >= UsageThresholds.dangerPct { return .stressed }
+        if pct >= tiredPct { return .tired }
+        if pct >= contentPct { return .content }
         return .happy
     }
 
@@ -102,20 +108,27 @@ enum MascotStyle: String, Codable {
 struct MascotPalette: Codable, Equatable {
     var B, D, L, O, E, W, M, C, S, A: UInt32
 
-    func color(for ch: Character) -> Color? {
+    /// Channel letter → packed hex. The one place the letter mapping lives:
+    /// both renderers (SwiftUI `color(for:)`, AppKit in `StatusItemController`)
+    /// derive from it, so the two can't drift.
+    func hex(for ch: Character) -> UInt32? {
         switch ch {
-        case "B": Color(hex: B)
-        case "D": Color(hex: D)
-        case "L": Color(hex: L)
-        case "O": Color(hex: O)
-        case "E": Color(hex: E)
-        case "W": Color(hex: W)
-        case "M": Color(hex: M)
-        case "C": Color(hex: C)
-        case "S": Color(hex: S)
-        case "A": Color(hex: A)
+        case "B": B
+        case "D": D
+        case "L": L
+        case "O": O
+        case "E": E
+        case "W": W
+        case "M": M
+        case "C": C
+        case "S": S
+        case "A": A
         default: nil
         }
+    }
+
+    func color(for ch: Character) -> Color? {
+        hex(for: ch).map { Color(hex: $0) }
     }
 
     var accent: Color { Color(hex: B) }
@@ -300,17 +313,5 @@ enum SpriteBuilder {
             g.set(8, 7, "E"); g.set(10, 7, "E"); g.set(9, 8, "E"); g.set(8, 9, "E"); g.set(10, 9, "E") // right ✕
             g.set(7, 12, "M"); g.set(8, 12, "M")                                    // low flat mouth
         }
-    }
-}
-
-extension Color {
-    init(hex: UInt32, alpha: Double = 1.0) {
-        self.init(
-            .sRGB,
-            red: Double((hex >> 16) & 0xFF) / 255,
-            green: Double((hex >> 8) & 0xFF) / 255,
-            blue: Double(hex & 0xFF) / 255,
-            opacity: alpha
-        )
     }
 }

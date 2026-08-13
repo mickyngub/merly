@@ -9,6 +9,10 @@ struct SettingsView: View {
     @ObservedObject var engine: UsageEngine
     let onDone: () -> Void
 
+    /// Captured once at init, not re-synced from the engine: this screen is the
+    /// only writer while it's open (each change writes straight through). An
+    /// external providers.json edit made while Settings is showing is clobbered
+    /// by the next toggle here — accepted; the screen lives for seconds.
     @State private var settings: NotificationSettings
     @State private var launchAtLogin: Bool
     /// "" is the auto pick — Picker needs a non-optional tag, and nil in the
@@ -16,7 +20,7 @@ struct SettingsView: View {
     @State private var menuBarProvider: String
     @Environment(\.theme) private var theme
 
-    private let accent = Color(hex: 0x4C8DFF)
+    private let accent = Theme.accent
 
     init(engine: UsageEngine, onDone: @escaping () -> Void) {
         self.engine = engine

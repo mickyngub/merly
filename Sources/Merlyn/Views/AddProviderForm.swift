@@ -24,6 +24,10 @@ struct AddProviderForm: View {
     @State private var account: String
     @State private var dir: String
     @State private var dirEdited: Bool
+    /// Whether `dir` exists on disk, refreshed by onChange — a cached flag rather
+    /// than a live computed property so the view never stats the filesystem per
+    /// render (repo rule: file I/O stays out of views; the engine does the check).
+    @State private var dirExists = false
     @State private var colorSlot: Int
     /// Resolved sprite selection for the edit-mode mascot picker; "" is the drawn critter.
     @State private var sprite: String
@@ -141,6 +145,9 @@ struct AddProviderForm: View {
             RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .strokeBorder(theme.cardBorder, lineWidth: 1)
         )
+        .onChange(of: dir, initial: true) { _, newDir in
+            dirExists = engine.directoryExists(newDir)
+        }
     }
 
     // MARK: sections
@@ -216,12 +223,7 @@ struct AddProviderForm: View {
     }
 
     private var previewStyle: MascotStyle {
-        if isEditing { return style }
-        switch kind {
-        case .claude: return .cat
-        case .codex: return .robot
-        case .kimi: return .round
-        }
+        isEditing ? style : kind.defaultStyle
     }
 
     /// The header preview mirrors the chosen sprite while editing; adding previews
@@ -262,62 +264,17 @@ struct AddProviderForm: View {
     }
 
     private func spriteThumb(_ id: String, label: String) -> some View {
-        let selected = sprite == id
-        let palette = previewPalette
-        return VStack(spacing: 3) {
-            Button { sprite = id } label: {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8).fill(theme.chip)
-                    MascotView(
-                        style: id.isEmpty ? style : .cat,
-                        palette: palette,
-                        mood: .happy,
-                        px: 28,
-                        bob: false,
-                        hopsOnHover: false,
-                        spriteName: id.isEmpty ? nil : id
-                    )
-                }
-                .frame(width: 44, height: 44)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(selected ? palette.accent : .clear, lineWidth: 2)
-                )
-            }
-            .buttonStyle(.plain)
-            Text(label)
-                .font(.system(size: 8.5, weight: selected ? .semibold : .regular))
-                .foregroundStyle(selected ? theme.text2 : theme.text3)
-        }
+        SpriteThumbButton(
+            id: id, label: label, selected: sprite == id,
+            palette: previewPalette, drawnStyle: style
+        ) { sprite = id }
     }
 
     private func paletteSwatch(_ slot: Int) -> some View {
-        let selected = slot == colorSlot
-        return Button {
-            colorSlot = slot
-        } label: {
-            Circle()
-                .fill(MascotPalette.fromHue(Fate.deckHue(slot: slot)).accent)
-                .frame(width: 16, height: 16)
-                .overlay(
-                    Circle().strokeBorder(
-                        selected ? theme.text : .clear,
-                        lineWidth: 1.5
-                    )
-                    .padding(-2.5)
-                )
-        }
-        .buttonStyle(.plain)
-        .help("Color \(slot + 1)")
+        PaletteSwatchButton(slot: slot, selected: slot == colorSlot) { colorSlot = slot }
     }
 
     // MARK: actions
-
-    private var dirExists: Bool {
-        var isDir: ObjCBool = false
-        let path = (dir as NSString).expandingTildeInPath
-        return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
-    }
 
     private var dirInUse: Bool {
         let trimmed = dir.trimmingCharacters(in: .whitespaces)
@@ -371,7 +328,7 @@ struct AddProviderForm: View {
             // New providers use their kind's default sprite (nil → resolved),
             // tinted by the chosen deck color.
             provider = ProviderConfig(
-                id: newID(name: trimmedName, account: trimmedAccount),
+                id: engine.uniqueProviderID(name: trimmedName, account: trimmedAccount, kind: kind),
                 name: trimmedName,
                 account: trimmedAccount,
                 kind: kind,
@@ -391,31 +348,6 @@ struct AddProviderForm: View {
             engine.updateProvider(provider)
         }
         onDone()
-    }
-
-    /// Slug from name+account, de-duped against existing ids with a numeric suffix.
-    private func newID(name: String, account: String) -> String {
-        let existing = Set(ConfigStore.load().providers.map(\.id))
-        var base = "\(name) \(account)".slugified
-        if base.isEmpty { base = kind.rawValue }
-        var id = base
-        var n = 2
-        while existing.contains(id) {
-            id = "\(base)-\(n)"
-            n += 1
-        }
-        return id
-    }
-}
-
-private extension String {
-    /// "Claude Work " → "claude-work"; anything non-alphanumeric becomes a dash.
-    var slugified: String {
-        lowercased()
-            .map { $0.isLetter || $0.isNumber ? String($0) : "-" }
-            .joined()
-            .split(separator: "-")
-            .joined(separator: "-")
     }
 }
 

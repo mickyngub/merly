@@ -140,13 +140,37 @@ private struct MascotControls: View {
     // MARK: pieces
 
     private func spriteThumb(_ id: String, label: String) -> some View {
-        let selected = sprite == id
-        return VStack(spacing: 3) {
-            Button { setSprite(id) } label: {
+        SpriteThumbButton(
+            id: id, label: label, selected: sprite == id,
+            palette: palette, drawnStyle: style
+        ) { setSprite(id) }
+    }
+
+    private func paletteSwatch(_ slot: Int) -> some View {
+        PaletteSwatchButton(slot: slot, selected: slot == colorSlot) { setSlot(slot) }
+    }
+}
+
+/// 44pt sprite-sheet thumbnail with a selection ring and caption — shared by
+/// the mascot editor and the provider edit form so the two pickers can't drift.
+/// `id` of "" previews the drawn critter in `drawnStyle` instead of a sheet.
+struct SpriteThumbButton: View {
+    let id: String
+    let label: String
+    let selected: Bool
+    let palette: MascotPalette
+    let drawnStyle: MascotStyle
+    let action: () -> Void
+
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Button(action: action) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8).fill(theme.chip)
                     MascotView(
-                        style: id.isEmpty ? style : .cat,
+                        style: id.isEmpty ? drawnStyle : .cat,
                         palette: palette,
                         mood: .happy,
                         px: 28,
@@ -162,15 +186,25 @@ private struct MascotControls: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("\(label) mascot\(selected ? ", selected" : "")")
             Text(label)
                 .font(.system(size: 8.5, weight: selected ? .semibold : .regular))
                 .foregroundStyle(selected ? theme.text2 : theme.text3)
         }
     }
+}
 
-    private func paletteSwatch(_ slot: Int) -> some View {
-        let selected = slot == colorSlot
-        return Button { setSlot(slot) } label: {
+/// 16pt fated-deck colour swatch with a selection ring — shared by the mascot
+/// editor and the provider edit form.
+struct PaletteSwatchButton: View {
+    let slot: Int
+    let selected: Bool
+    let action: () -> Void
+
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        Button(action: action) {
             Circle()
                 .fill(MascotPalette.fromHue(Fate.deckHue(slot: slot)).accent)
                 .frame(width: 16, height: 16)
@@ -180,6 +214,7 @@ private struct MascotControls: View {
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Color \(slot + 1)\(selected ? ", selected" : "")")
         .help("Color \(slot + 1)")
     }
 }

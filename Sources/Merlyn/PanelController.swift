@@ -12,7 +12,8 @@ enum PanelScreen { case dock, mascot }
 @MainActor
 final class PanelState: ObservableObject {
     @Published var openGeneration = 0
-    /// Screen to jump to on the next open (reset to `.dock` by the dock once shown).
+    /// Screen to jump to on the next open. Never reset — `open(screen:)`
+    /// reassigns it on every open, so a stale value can't leak into a later one.
     @Published var initialScreen: PanelScreen = .dock
 }
 

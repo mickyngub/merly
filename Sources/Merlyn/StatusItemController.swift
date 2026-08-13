@@ -134,18 +134,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // be attributed to one. The app's own mascot lives beside the panel title
         // instead, where it isn't competing with a reading. Only an app with no
         // providers at all falls back to it here.
-        let wearsProvider = reported != nil
-        let mascot = config.defaultMascotConfig
-        let sprite = wearsProvider
-            ? reported?.resolvedSpriteForm
-            : SpriteSheetStore.formSprite(base: mascot.resolvedSprite, form: reported?.game?.form ?? 0)
-        let style = wearsProvider ? reported!.config.resolvedStyle : mascot.style
-        let palette = wearsProvider ? reported!.config.resolvedPalette : mascot.resolvedPalette
-        // A provider's own critter may look dead — that's information. The app's
-        // mascot is the app itself, so one lapsed provider mustn't kill it.
-        let mood = wearsProvider
-            ? reported!.mood
-            : (reported.map { $0.isUnavailable ? .happy : $0.mood } ?? .happy)
+        let sprite: String?
+        let style: MascotStyle
+        let palette: MascotPalette
+        let mood: Mood
+        if let reported {
+            sprite = reported.resolvedSpriteForm
+            style = reported.config.resolvedStyle
+            palette = reported.config.resolvedPalette
+            mood = reported.mood
+        } else {
+            let mascot = config.defaultMascotConfig
+            sprite = SpriteSheetStore.formSprite(base: mascot.resolvedSprite, form: 0)
+            style = mascot.style
+            palette = mascot.resolvedPalette
+            // A provider's own critter may look dead — that's information. The
+            // app's mascot is the app itself, so it stays happy with no provider.
+            mood = .happy
+        }
 
         // Keyed on the provider so the panel card for the same account shares this
         // critter's flourishes; the app's mascot has its own key for when there is
@@ -154,7 +160,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         MascotAnimator.shared.register(key, moodRow: mood.spriteRow, animates: mood != .dead)
         current = (sprite, style, palette, mood, key,
                    reported?.iconGauges ?? [], reported?.failure)
-        button.toolTip = Self.tooltip(for: reported, pinned: config.menuBarProviderId != nil)
+        let tooltip = Self.tooltip(for: reported, pinned: config.menuBarProviderId != nil)
+        button.toolTip = tooltip
+        // The tooltip already narrates the whole reading; give VoiceOver the same.
+        button.setAccessibilityLabel(tooltip)
         renderFrame()
     }
 
@@ -230,7 +239,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let labelGap = labelToBar
 
         if let failure {
-            let tint = Self.nsColor(hex: failure.isFault ? 0xE5484D : 0xE8A33D)
+            let tint = Self.nsColor(hex: failure.isFault ? Theme.dangerHex : Theme.warnHex)
             // Sized off the mascot rather than fixed at 8pt: the critter shrank to
             // 10pt to make room for the label rows, and a fixed badge would have taken
             // four fifths of its width.
@@ -321,7 +330,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 // is an NSColor: the limit's own colour, red only once it's about to
                 // block. No amber band — that made a 70% week amber here and lime on
                 // the card.
-                let fillHex = lane.pct >= Theme.dangerPct ? 0xE5484D : lane.colorHex
+                let fillHex = lane.pct >= Theme.dangerPct ? Theme.dangerHex : lane.colorHex
                 Self.nsColor(hex: fillHex).setFill()
                 // Never narrower than the bar is tall, so a live 1% still reads as a
                 // fill rather than a rendering artefact.
@@ -441,25 +450,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private static func nsColor(palette: MascotPalette, ch: Character) -> NSColor? {
-        let hex: UInt32? = switch ch {
-        case "B": palette.B
-        case "D": palette.D
-        case "L": palette.L
-        case "O": palette.O
-        case "E": palette.E
-        case "W": palette.W
-        case "M": palette.M
-        case "C": palette.C
-        case "S": palette.S
-        case "A": palette.A
-        default: nil
-        }
-        guard let hex else { return nil }
-        return NSColor(
-            srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
-            green: CGFloat((hex >> 8) & 0xFF) / 255,
-            blue: CGFloat(hex & 0xFF) / 255,
-            alpha: 1
-        )
+        palette.hex(for: ch).map(nsColor(hex:))
     }
 }

@@ -50,18 +50,26 @@ struct Theme {
 
     /// Where a limit turns red — the one severity escalation any gauge applies
     /// (`limitColor`). There is no amber band: see `limitColor` for why.
-    static let dangerPct: Double = 88
+    /// Defined in the data layer (the mascot mood and `blockingLimit` read it
+    /// too); re-exported here because every UI call site says "Theme".
+    static let dangerPct = UsageThresholds.dangerPct
 
     /// Where a limit stops being "nearly out" and starts actually blocking work.
-    /// Deliberately not `dangerPct`: a red 94% weekly is still usable, and saying
-    /// "maxed" there is wrong. 99.5 rather than 100 so it agrees with the rounded
-    /// "100% used" the bars print — the API reports fractions like 99.6.
-    static let exhaustedPct: Double = 99.5
+    /// See `UsageThresholds.exhaustedPct` for why it isn't `dangerPct` or 100.
+    static let exhaustedPct = UsageThresholds.exhaustedPct
 
-    static let danger = Color(hex: 0xE5484D)
+    /// Escalation hexes exposed as raw values because the menu bar gauge draws
+    /// in AppKit — one source of truth for both `Color` and `NSColor` paths.
+    static let dangerHex: UInt32 = 0xE5484D
     /// Amber. Not a usage band — it tints the failure badges, where it means "this
     /// fixes itself" as against `danger`'s "this account is broken".
-    static let warn = Color(hex: 0xE8A33D)
+    static let warnHex: UInt32 = 0xE8A33D
+
+    static let danger = Color(hex: dangerHex)
+    static let warn = Color(hex: warnHex)
+
+    /// The app's control accent (settings toggles, the sign-in button hover).
+    static let accent = Color(hex: 0x4C8DFF)
 
     /// The colour a limit is drawn in: its own lane colour (see
     /// `ProviderKind.limitColorHex`), red once it's close to blocking.
@@ -105,6 +113,19 @@ struct Theme {
     /// The 0.32,0.72,0,1 curve used for nearly every transition in the prototype.
     static func snappy(_ duration: Double) -> Animation {
         .timingCurve(0.32, 0.72, 0, 1, duration: duration)
+    }
+}
+
+extension Color {
+    /// Packed 0xRRGGBB → Color, the app's standard for design tokens and palettes.
+    init(hex: UInt32, alpha: Double = 1.0) {
+        self.init(
+            .sRGB,
+            red: Double((hex >> 16) & 0xFF) / 255,
+            green: Double((hex >> 8) & 0xFF) / 255,
+            blue: Double(hex & 0xFF) / 255,
+            opacity: alpha
+        )
     }
 }
 

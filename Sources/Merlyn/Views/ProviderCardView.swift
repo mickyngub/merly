@@ -13,7 +13,7 @@ struct ProviderCardView: View {
     var onDelete: () -> Void = {}
 
     // --expand pre-opens every card (visual QA without scripted clicks)
-    @State private var open = ProcessInfo.processInfo.arguments.contains("--expand")
+    @State private var open = QAFlags.expandCards
     @State private var hovering = false
     @Environment(\.theme) private var theme
 
@@ -72,6 +72,13 @@ struct ProviderCardView: View {
             } else {
                 withAnimation(Theme.snappy(0.34)) { open.toggle() }
             }
+        }
+        // The tap gesture above is invisible to VoiceOver/keyboard; mirror it.
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("\(snapshot.config.name) \(snapshot.config.account) — \(snapshot.gaugeTooltip())")
+        .accessibilityHint(editing ? "Edit this provider" : (open ? "Collapse details" : "Expand details"))
+        .accessibilityAction {
+            if editing { onEdit() } else { open.toggle() }
         }
         .onHover { hovering = $0 }
         .help(snapshot.note ?? "")
@@ -239,9 +246,9 @@ struct ProviderCardView: View {
                 if let failure = snapshot.failure {
                     Text(failure.headline)
                 } else if let blocking = snapshot.blockingLimit {
-                    Text(Self.blockingText(blocking, now: context.date))
+                    Text(UsageFormatting.blockingText(blocking, now: context.date))
                 } else if let resetAt = snapshot.sessionResetAt {
-                    Text("Resets in \(Self.duration(until: resetAt, now: context.date))")
+                    Text("Resets in \(UsageFormatting.duration(until: resetAt, now: context.date))")
                 } else {
                     Text("No active session")
                 }
@@ -313,7 +320,7 @@ struct ProviderCardView: View {
                 label: snapshot.hasSessionWindow ? "Current session" : "\(snapshot.primaryWindowName) usage",
                 pct: snapshot.sessionPct,
                 caption: snapshot.sessionResetAt.map {
-                    "\(snapshot.primaryWindowName) limit · resets in \(Self.duration(until: $0, now: context.date))"
+                    "\(snapshot.primaryWindowName) limit · resets in \(UsageFormatting.duration(until: $0, now: context.date))"
                 } ?? "\(snapshot.primaryWindowName) limit · no active session",
                 color: laneColor(label: snapshot.primaryWindowName, pct: snapshot.sessionPct)
             )
@@ -338,27 +345,6 @@ struct ProviderCardView: View {
         }
     }
 
-    /// What's standing between you and the next request, for the clock line. Kept
-    /// short enough to sit on one line beside the mascot and the ring.
-    static func blockingText(_ blocking: WeeklyMetric, now: Date) -> String {
-        let word = blocking.isWeekly ? "Weekly" : "5h cap"
-        // Terse because the wider nested ring leaves this line ~136pt; the clock
-        // glyph beside it already supplies "resets".
-        guard let resetAt = blocking.resetAt else { return "\(word) maxed" }
-        return "\(word) in \(duration(until: resetAt, now: now))"
-    }
-
-    static func duration(until end: Date, now: Date) -> String {
-        let remaining = end.timeIntervalSince(now)
-        if remaining <= 0 { return "now" }
-        let minutes = Int(remaining / 60)
-        let hours = minutes / 60
-        // Weekly windows are days out; "91h 55m" is unreadable as a countdown.
-        if hours >= 24 { return "\(hours / 24)d \(hours % 24)h" }
-        if hours > 0 { return "\(hours)h \(minutes % 60)m" }
-        let seconds = Int(remaining) % 60
-        return "\(minutes)m \(seconds)s"
-    }
 }
 
 /// A capsule filled to `fraction` of the space it's given.
@@ -547,7 +533,7 @@ struct SignInBadge: View {
         Button { LoginLauncher.openLogin(for: config) } label: {
             ZStack {
                 Circle()
-                    .fill(hovering ? Color(hex: 0x4C8DFF) : theme.chip)
+                    .fill(hovering ? Theme.accent : theme.chip)
                 Circle()
                     .stroke(hovering ? .clear : theme.track, lineWidth: 1)
                 Image(systemName: "person.badge.key")
