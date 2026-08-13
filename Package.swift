@@ -9,6 +9,11 @@ let package = Package(
             name: "Merlyn",
             path: "Sources/Merlyn",
             resources: [.copy("Resources")]
-        )
+        ),
+        .testTarget(
+            name: "MerlynTests",
+            dependencies: ["Merlyn"],
+            path: "Tests/MerlynTests"
+        ),
     ]
 )
