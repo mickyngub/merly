@@ -204,6 +204,7 @@ QA flags. These work on any build of the binary — the installed one
 | `--open` | Launch with the panel already open |
 | `--expand` | With `--open`: cards expanded |
 | `--rail` | With `--open`: collapsed to the mascot rail |
+| `--edit` | With `--open`: the list in reorder/delete mode |
 | `--light` | Force the light theme |
 | `--mascot` | Jump straight to the mascot editor |
 
