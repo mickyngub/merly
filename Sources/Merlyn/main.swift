@@ -9,6 +9,10 @@ import AppKit
 enum QAFlags {
     /// `--expand` pre-opens every provider card (visual QA without scripted clicks).
     static let expandCards = CommandLine.arguments.contains("--expand")
+    /// `--edit` opens the list already in reorder/delete mode — the grips, the edit
+    /// and delete buttons, and the drag are otherwise a click away from every
+    /// screenshot.
+    static let editMode = CommandLine.arguments.contains("--edit")
     /// Delay before routing an already-open panel to a QA screen: the SwiftUI
     /// host must be mounted so its `openGeneration` onChange fires. Timing-based
     /// because these are QA-only paths — a dropped route on a pathologically slow

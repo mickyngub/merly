@@ -77,7 +77,7 @@ final class PanelController: NSObject {
         let dockRoot = PanelRootView(
             engine: engine,
             panelState: panelState,
-            onCollapse: { [weak self] in self?.collapseToRail() }
+            onDismiss: { [weak self] in self?.hide() }
         )
         panel.contentView = NSHostingView(rootView: dockRoot)
 
@@ -197,11 +197,15 @@ final class PanelController: NSObject {
 
     // MARK: outside-click dismissal
 
+    /// Clicking away collapses to the rail rather than hiding outright: going back
+    /// to work is the common reason to click off the panel, and the rail keeps the
+    /// mascots and their gauges on screen. Fully dismissing is the chevron's job —
+    /// the one gesture that means "get this off my screen".
     private func installMonitors() {
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.state == .open else { return }
-                self.hide()
+                self.collapseToRail()
             }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
@@ -210,7 +214,7 @@ final class PanelController: NSObject {
                window != self.panel, window != self.rail,
                !(window is NSSavePanel), // the form's folder picker
                !self.ignoredWindows.contains(window) {
-                self.hide()
+                self.collapseToRail()
             }
             return event
         }
@@ -244,7 +248,8 @@ struct VisualEffect: NSViewRepresentable {
 struct PanelRootView: View {
     @ObservedObject var engine: UsageEngine
     @ObservedObject var panelState: PanelState
-    let onCollapse: () -> Void
+    /// The chevron tab: dismisses the panel outright, rail included.
+    let onDismiss: () -> Void
 
     @Environment(\.colorScheme) private var scheme
 
@@ -270,7 +275,7 @@ struct PanelRootView: View {
         .clipShape(shape)
         .overlay(shape.stroke(theme.panelEdge, lineWidth: 0.5))
         .overlay(alignment: .leading) {
-            HandleButton(action: onCollapse)
+            HandleButton(action: onDismiss)
         }
         .environment(\.theme, theme)
     }
@@ -318,7 +323,7 @@ struct PanelShape: Shape {
     }
 }
 
-/// The chevron inside the panel's collapse tab. The tab itself is part of
+/// The chevron inside the panel's dismiss tab. The tab itself is part of
 /// `PanelShape`, so this is only the glyph plus a slightly wider hit area.
 struct HandleButton: View {
     let action: () -> Void
@@ -332,16 +337,24 @@ struct HandleButton: View {
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(hovering ? theme.text : theme.text2)
+                // Optical centring, not geometric. Dead-centre in the frame the
+                // chevron reads as pushed toward the panel: the tab's outer edge
+                // is a hard outline while its inner edge dissolves into the panel
+                // body, so the eye sees more room on the right. `chevron.right`
+                // also carries its ink left of its own box's centre. Nudging back
+                // toward the outer edge puts it where it looks centred.
+                .offset(x: -1.5)
                 .frame(width: PanelController.handleOverhang,
                        height: PanelController.handleHeight)
-                // Reaches a little past the seam so the tab is easy to grab,
-                // without shifting the glyph off the tab's center.
-                .padding(.trailing, 7)
-                .contentShape(Rectangle())
+                // Grabbable a little past the tab's edges without moving the
+                // glyph: grown symmetrically, so the target stays centred on the
+                // chevron rather than trailing off to one side of it.
+                .contentShape(Rectangle().inset(by: -7))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help("Collapse to rail")
+        .pointerCursor()
+        .help("Hide Merlyn — the menu bar icon brings it back")
     }
 }
 

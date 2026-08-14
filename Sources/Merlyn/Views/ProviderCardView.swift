@@ -2,13 +2,16 @@
 // countdown + mood tag + session ring, expanding to weekly bars and the
 // source config folder.
 
+import AppKit
 import SwiftUI
 
 struct ProviderCardView: View {
     let snapshot: ProviderSnapshot
-    /// Edit mode swaps the session ring for a delete button + drag grip and
-    /// pauses tap-to-expand so reordering drags don't toggle the detail.
+    /// Edit mode swaps the session ring for edit + delete buttons and a drag grip,
+    /// and pauses tap-to-expand so reordering drags don't toggle the detail.
     var editing: Bool = false
+    /// This card is the one being dragged to a new position.
+    var dragging: Bool = false
     var onEdit: () -> Void = {}
     var onDelete: () -> Void = {}
 
@@ -56,15 +59,19 @@ struct ProviderCardView: View {
         .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
         .background(
             RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .fill(hovering ? theme.cardBackgroundHover : theme.cardBackground)
+                .fill(hovering || dragging ? theme.cardBackgroundHover : theme.cardBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .strokeBorder(theme.cardBorder, lineWidth: 0.5)
         )
         .offset(y: hovering && !editing ? -1 : 0)
-        .shadow(color: .black.opacity(hovering && !editing ? 0.10 : 0), radius: 9, y: 6)
+        // Held cards lift off the list so it's obvious which one the neighbours
+        // are sliding around.
+        .scaleEffect(dragging ? 1.02 : 1)
+        .shadow(color: .black.opacity(shadowOpacity), radius: dragging ? 14 : 9, y: dragging ? 9 : 6)
         .animation(.easeOut(duration: 0.18), value: hovering)
+        .animation(Theme.snappy(0.3), value: dragging)
         .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         .onTapGesture {
             if editing {
@@ -81,15 +88,28 @@ struct ProviderCardView: View {
             if editing { onEdit() } else { open.toggle() }
         }
         .onHover { hovering = $0 }
+        // The whole card is a control — the pointer should say so before the click.
+        // In edit mode it's a grab handle instead, so it wears a hand that opens
+        // and closes.
+        .pointerCursor(editing ? (dragging ? .closedHand : .openHand) : .pointingHand)
         .help(snapshot.note ?? "")
+    }
+
+    private var shadowOpacity: Double {
+        if dragging { return 0.22 }
+        return hovering && !editing ? 0.10 : 0
     }
 
     private var cardTop: some View {
         HStack(spacing: 11) {
             if editing {
                 Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(theme.text3)
+                    // Pinned narrow: edit mode fits a grip and two buttons into the
+                    // same row width as the ring it replaced, and every point here
+                    // comes out of the name and the countdown beside it.
+                    .frame(width: 12)
                     .help("Drag to reorder")
             }
             VStack(spacing: 3) {
@@ -196,7 +216,23 @@ struct ProviderCardView: View {
 
             Group {
                 if editing {
-                    DeleteButton(action: onDelete)
+                    // Tapping the card edits it too, but nothing said so — the row
+                    // read as "drag me or delete me". A pencil beside the trash
+                    // names the third action.
+                    HStack(spacing: 5) {
+                        CardActionButton(
+                            systemName: "pencil",
+                            tint: Theme.accent,
+                            help: "Edit \(snapshot.config.name)\(snapshot.config.account.isEmpty ? "" : " (\(snapshot.config.account))")",
+                            action: onEdit
+                        )
+                        CardActionButton(
+                            systemName: "trash",
+                            tint: Color(hex: 0xD9544E),
+                            help: "Remove this provider",
+                            action: onDelete
+                        )
+                    }
                 } else if snapshot.needsSignIn {
                     SignInBadge(config: snapshot.config)
                 } else if let failure = snapshot.failure {
@@ -551,12 +587,21 @@ struct SignInBadge: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .pointerCursor()
         .help("Sign in to \(config.name) — runs `\(config.loginShellCommand)` in a terminal")
     }
 }
 
-/// Round trash button shown on each card in edit mode. Reddens on hover.
-struct DeleteButton: View {
+/// Round action button shown on each card in edit mode — edit and delete. Fills
+/// with its tint on hover.
+///
+/// 28pt rather than the 34 the lone trash button used: two of them plus the drag
+/// grip eat into the same row as the name and the reset countdown, and that text
+/// truncating is a worse trade than a slightly smaller target.
+struct CardActionButton: View {
+    let systemName: String
+    let tint: Color
+    let help: String
     let action: () -> Void
 
     @State private var hovering = false
@@ -564,17 +609,16 @@ struct DeleteButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "trash")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(hovering ? .white : Color(hex: 0xD9544E))
-                .frame(width: 34, height: 34)
-                .background(
-                    Circle().fill(hovering ? Color(hex: 0xD9544E) : theme.chip)
-                )
+            Image(systemName: systemName)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(hovering ? .white : tint)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(hovering ? tint : theme.chip))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help("Remove this provider")
+        .pointerCursor()
+        .help(help)
     }
 }
 

@@ -84,7 +84,7 @@ final class UsageEngine: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.cooldowns = cooldownsOut
-                self.snapshots = results
+                self.snapshots = self.inConfigOrder(results)
                 self.lastRefresh = Date()
                 self.isRefreshing = false
                 if self.pendingRefresh {
@@ -95,6 +95,20 @@ final class UsageEngine: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Lays a finished pass out in the config's *current* order.
+    ///
+    /// A pass carries the provider list it started with, and the user can reorder
+    /// or delete during the seconds it runs — dropping the results in verbatim
+    /// replayed that stale list, so a card dragged to a new slot sprang back to its
+    /// old one the moment the pass landed. Anything the config lists but the pass
+    /// never read (a provider added mid-pass) keeps the snapshot it already has,
+    /// rather than blinking out until the queued refresh catches up.
+    private func inConfigOrder(_ results: [ProviderSnapshot]) -> [ProviderSnapshot] {
+        let fresh = Dictionary(results.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let current = Dictionary(snapshots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return appConfig.providers.compactMap { fresh[$0.id] ?? current[$0.id] }
     }
 
     /// Append a provider to providers.json and kick a refresh. An empty snapshot

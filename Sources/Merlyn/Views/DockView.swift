@@ -1,8 +1,8 @@
 // DockView.swift — the docked panel content: header, provider card list with
 // staggered entrance, and the add-provider affordance. Also the collapsed rail.
 
+import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Which screen the dock body shows. One value, so two screens can never be on
 /// at once — the old five independent booleans had to be zeroed in four places,
@@ -32,8 +32,11 @@ struct DockView: View {
     let initialScreen: PanelScreen
 
     @State private var refreshSpin = 0.0
-    @State private var screen: DockScreen = .list(.browsing)
-    @State private var draggingId: String?
+    @State private var screen: DockScreen = .list(QAFlags.editMode ? .editing : .browsing)
+    @State private var drag: DragReorder?
+    /// One card plus the list's spacing — how far a reorder drag travels per slot.
+    /// Measured rather than assumed: the card's height moves with its content.
+    @State private var rowStep: CGFloat = 0
     @Environment(\.theme) private var theme
 
     /// The list's inline mode, or nil when another screen is up.
@@ -48,7 +51,7 @@ struct DockView: View {
         VStack(spacing: 0) {
             header
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 9) {
+                VStack(spacing: Self.listSpacing) {
                     switch screen {
                     case .mascot:
                         MascotEditorView(engine: engine) {
@@ -65,18 +68,21 @@ struct DockView: View {
                     }
                 }
                 .padding(EdgeInsets(top: 2, leading: 10, bottom: 12, trailing: 10))
-                // Reset the drag state when a card is dropped in a gap (no card
-                // delegate fires), so the faded card snaps back to full opacity.
-                .onDrop(of: [.text], isTargeted: nil) { _ in
-                    draggingId = nil
-                    return false
+                .onPreferenceChange(RowHeightKey.self) { height in
+                    if height > 0 { rowStep = height + Self.listSpacing }
                 }
             }
         }
         .onChange(of: openGeneration) { _, _ in
-            screen = initialScreen == .mascot ? .mascot : .list(.browsing)
+            screen = initialScreen == .mascot ? .mascot : .list(QAFlags.editMode ? .editing : .browsing)
         }
+        // Leaving edit mode (or the list entirely) tears the held card's gesture
+        // out from under it, so drop the drag rather than let it strand a card.
+        .onChange(of: isEditing) { _, _ in drag = nil }
     }
+
+    /// Vertical gap between cards, shared with the drag's row arithmetic.
+    private static let listSpacing: CGFloat = 9
 
     @ViewBuilder
     private var providerList: some View {
@@ -87,16 +93,23 @@ struct DockView: View {
                 }
                 .entrance(index: index, generation: openGeneration)
             } else {
+                let held = drag?.id == snapshot.id
                 ProviderCardView(
                     snapshot: snapshot,
                     editing: isEditing,
+                    dragging: held,
                     onEdit: { withAnimation(Theme.snappy(0.4)) { screen = .list(.editingProvider(snapshot.id)) } },
                     onDelete: { withAnimation(Theme.snappy(0.4)) { engine.removeProvider(snapshot.id) } }
                 )
-                .opacity(draggingId == snapshot.id ? 0.4 : 1)
-                .reorderable(active: isEditing, id: snapshot.id, draggingId: $draggingId) { dragged, target in
-                    withAnimation(Theme.snappy(0.3)) { engine.moveProvider(dragged, toIndexOf: target) }
-                }
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: RowHeightKey.self, value: geo.size.height)
+                    }
+                )
+                .offset(y: held ? drag?.offset ?? 0 : 0)
+                // The held card rides above its neighbours as they slide past it.
+                .zIndex(held ? 1 : 0)
+                .gesture(reorderGesture(snapshot), including: isEditing ? .all : .subviews)
                 .entrance(index: index, generation: openGeneration)
             }
         }
@@ -114,6 +127,50 @@ struct DockView: View {
             }
             .entrance(index: engine.snapshots.count, generation: openGeneration)
         }
+    }
+
+    /// Drag-to-reorder, hand-rolled rather than `onDrag`/`onDrop`.
+    ///
+    /// The AppKit drag session behind `onDrag` ends wherever the pointer happens to
+    /// be, and a drop outside the panel fires no delegate at all — so the card it
+    /// had faded to 0.4 stayed faded until edit mode was toggled. A gesture always
+    /// terminates in `onEnded`, so the held card can't be stranded, and it gets to
+    /// follow the cursor instead of trailing a translucent system drag image.
+    private func reorderGesture(_ snapshot: ProviderSnapshot) -> some Gesture {
+        DragGesture(minimumDistance: 5)
+            .onChanged { value in
+                guard isEditing else { return }
+                var state = drag ?? DragReorder(id: snapshot.id)
+                guard state.id == snapshot.id else { return }
+                state.offset = value.translation.height - state.consumed
+
+                if rowStep > 0,
+                   let index = engine.snapshots.firstIndex(where: { $0.id == snapshot.id }) {
+                    // 0.6 of a row, not half: right after a swap the card sits 0.4
+                    // of a row past its new slot, and an exact-half threshold would
+                    // swap it straight back on the next frame, forever.
+                    if state.offset > rowStep * 0.6, index + 1 < engine.snapshots.count {
+                        move(snapshot.id, toIndexOf: engine.snapshots[index + 1].id)
+                        state.consumed += rowStep
+                    } else if state.offset < -rowStep * 0.6, index > 0 {
+                        move(snapshot.id, toIndexOf: engine.snapshots[index - 1].id)
+                        state.consumed -= rowStep
+                    }
+                    state.offset = value.translation.height - state.consumed
+                }
+                // The card must track the cursor exactly, so its offset stays out
+                // of the reorder's animation transaction.
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { drag = state }
+            }
+            .onEnded { _ in
+                withAnimation(Theme.snappy(0.3)) { drag = nil }
+            }
+    }
+
+    private func move(_ id: String, toIndexOf targetId: String) {
+        withAnimation(Theme.snappy(0.28)) { engine.moveProvider(id, toIndexOf: targetId) }
     }
 
     /// The app's own mascot beside the title — its home, now that the menu bar
@@ -145,6 +202,7 @@ struct DockView: View {
             }
         }
         .buttonStyle(.plain)
+        .pointerCursor()
         .accessibilityLabel("Edit the Merlyn mascot")
         .help("Merlyn — click to edit the mascot")
     }
@@ -192,59 +250,20 @@ struct DockView: View {
     }
 }
 
-/// Makes a card draggable and a drop target while edit mode is on. As a dragged
-/// card passes over another, `onMove` reorders live under the cursor.
-private struct Reorderable: ViewModifier {
-    let active: Bool
+/// The card being dragged in edit mode: which one, how far it's been pulled from
+/// the slot it currently occupies, and how much of the cursor's travel has already
+/// been spent on rows that swapped underneath it.
+struct DragReorder: Equatable {
     let id: String
-    @Binding var draggingId: String?
-    let onMove: (_ dragged: String, _ target: String) -> Void
-
-    func body(content: Content) -> some View {
-        if active {
-            content
-                .onDrag {
-                    draggingId = id
-                    return NSItemProvider(object: id as NSString)
-                }
-                .onDrop(
-                    of: [.text],
-                    delegate: ReorderDropDelegate(targetId: id, draggingId: $draggingId, onMove: onMove)
-                )
-        } else {
-            content
-        }
-    }
+    var offset: CGFloat = 0
+    var consumed: CGFloat = 0
 }
 
-private struct ReorderDropDelegate: DropDelegate {
-    let targetId: String
-    @Binding var draggingId: String?
-    let onMove: (_ dragged: String, _ target: String) -> Void
-
-    func dropEntered(info: DropInfo) {
-        guard let dragged = draggingId, dragged != targetId else { return }
-        onMove(dragged, targetId)
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        draggingId = nil
-        return true
-    }
-}
-
-private extension View {
-    func reorderable(
-        active: Bool,
-        id: String,
-        draggingId: Binding<String?>,
-        onMove: @escaping (_ dragged: String, _ target: String) -> Void
-    ) -> some View {
-        modifier(Reorderable(active: active, id: id, draggingId: draggingId, onMove: onMove))
+/// Tallest card in the list — the reorder drag's step size.
+private struct RowHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -265,6 +284,7 @@ struct IconButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .pointerCursor()
     }
 }
 
@@ -304,6 +324,7 @@ struct AddProviderCard: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .pointerCursor()
         .help("Add a provider right here — saved to providers.json")
     }
 }
@@ -364,6 +385,7 @@ struct RailView: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onExpand)
         .onHover { hovering = $0 }
+        .pointerCursor()
         // The whole rail is one click target, so it presents as one button.
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
