@@ -14,7 +14,7 @@ Each provider gets a cute 8-bit pixel critter whose **mood tracks your usage**: 
 
 - **Menu bar**: the busiest provider's mascot + its session percentage. Click to reveal.
 - **Dock panel**: a frosted-glass column that slides in from the right screen edge. One card per provider: session ring (`58% used · resets in 57m`), mood tag, and a tap-to-expand section with weekly bars and the source folder.
-- **Rail**: collapse the panel (chevron handle) to a slim strip of peeking mascots.
+- **Rail**: click anywhere outside the panel and it collapses to a slim strip of peeking mascots with their gauges; click the strip to bring the panel back. The chevron handle dismisses it outright.
 - Follows the system light/dark appearance. It's a menu bar app — there's no Dock icon; look up top.
 
 ## Install

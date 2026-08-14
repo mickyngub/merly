@@ -27,6 +27,7 @@ Useful QA flags:
 | `--open --expand` | …with all cards expanded. |
 | `--open --light` | …forcing light appearance. |
 | `--open --rail` | …collapsed to the mascot rail. |
+| `--open --edit` | …in reorder/delete mode (grips, edit + delete buttons, drag). |
 | `--mascot` | Launch straight into the menu bar mascot editor. |
 
 To assemble a runnable `.app`:
