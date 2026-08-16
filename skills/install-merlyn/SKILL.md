@@ -1,6 +1,6 @@
 ---
 name: install-merlyn
-description: Install, update, or troubleshoot Merlyn — the macOS menu bar app that tracks Claude/Codex/Kimi agent quota usage with pixel mascots. Merlyn ships as source only (no DMG, no download), so installing means build → /Applications via scripts/install.sh. Use this skill whenever someone wants to install, set up, build, reinstall, update, or upgrade Merlyn, or get it running on a new Mac. Also use it when Merlyn misbehaves after an install — nothing appears in the menu bar, the Keychain prompt keeps coming back after every build, "no providers configured", missing or stale usage numbers, `≈` estimates instead of real limits, or a build that won't compile. Also use it if they describe wanting "that quota mascot app" running.
+description: Install, update, or troubleshoot Merlyn — the macOS menu bar app that tracks Claude/Codex/Kimi agent quota usage with pixel mascots. Merlyn ships as source only (no DMG, no download), so installing means build → /Applications via scripts/install.sh. Use this skill whenever someone wants to install, set up, build, reinstall, update, or upgrade Merlyn, or get it running on a new Mac. Also use it when Merlyn misbehaves after an install — nothing appears in the menu bar, usage alerts never show up, the Keychain prompt keeps coming back after every build, "no providers configured", missing or stale usage numbers, `≈` estimates instead of real limits, or a build that won't compile. Also use it if they describe wanting "that quota mascot app" running.
 ---
 
 # Installing Merlyn
@@ -20,8 +20,16 @@ Repo: <https://github.com/mickyngub/merlyn>
 
 ## Install
 
-From a checkout, one command does everything — preflight, build, quit any running
-copy, install, launch:
+Once per machine, before the first build — this is what lets macOS remember the
+notification permission and the Keychain grant across rebuilds (see *First launch*
+for why it matters):
+
+```sh
+scripts/make-signing-cert.sh
+```
+
+Then one command does everything — preflight, build, quit any running copy,
+install, launch:
 
 ```sh
 scripts/install.sh
@@ -89,26 +97,33 @@ toggles the panel; right-click opens the menu.
 It will ask for **Keychain access** to read the Claude Code credentials — click
 **Always Allow**.
 
-> ### That Keychain prompt returns after every rebuild — this is expected
+> ### Run the signing-identity script once, before the first build
 >
-> macOS ties an "Always Allow" grant to the app's exact code signature. A locally
-> built Merlyn is *ad-hoc* signed, so its designated requirement is a hash of that
-> one binary:
+> ```sh
+> scripts/make-signing-cert.sh
+> ```
+>
+> macOS ties two grants to an app's exact code signature. Without a stable
+> identity, an *ad-hoc* signed Merlyn has a designated requirement that is a hash of
+> that one binary:
 >
 > ```sh
 > codesign -d -r- /Applications/Merlyn.app   # => cdhash H"..."
 > ```
 >
-> Every build produces a different hash, so every build is a new identity as far as
-> the Keychain is concerned. Say this up front, so a returning prompt doesn't read
-> as something sinister.
+> Every build produces a different hash, so every build is a new app as far as
+> macOS is concerned, and the **Keychain prompt returns after every rebuild**.
 >
-> Someone who rebuilds often can stop it with a **self-signed** identity: Keychain
-> Access → Certificate Assistant → Create a Certificate → type *Code Signing*, then
-> `SIGN_IDENTITY="Merlyn Self-Signed" scripts/install.sh`. That gives a stable
-> requirement (`identifier "sh.micky.merlyn" and certificate leaf = H"…"`) which
-> survives rebuilds. It does nothing for Gatekeeper — a self-signed leaf isn't a
-> trusted anchor — and only helps the machine holding the certificate.
+> `make-signing-cert.sh` creates a local self-signed identity once, which
+> `scripts/bundle.sh` and `install.sh` then pick up automatically. It asks for your
+> login password once (to trust the certificate), and the first build after it asks
+> once for Keychain access to the *signing key* — choose **Always Allow**. It does
+> nothing for Gatekeeper (a self-signed leaf isn't a trusted anchor) and only helps
+> the machine holding it. Undo:
+> `security delete-certificate -c "Merlyn Local Signing"`.
+>
+> It has **no effect on notifications**, which look like they should be governed by
+> the same thing but are keyed to the bundle id instead — see Troubleshooting.
 
 ## Update
 
@@ -176,6 +191,28 @@ Delete the parse cache; it rebuilds safely (first rescan ~20s):
 rm ~/Library/Application\ Support/Merlyn/usage-cache.json
 ```
 
+**Usage alerts never appear**
+First check they're on: panel → gear → **Alerts**. That section's bottom row says
+what macOS will do with an alert and has a **Send a test** button — use it before
+anything else, since silence otherwise looks the same as "nothing crossed a limit".
+
+- *"Notifications are turned off"* / *"alert style is None"* → fix it in System
+  Settings › Notifications › Merlyn (the row's button opens it).
+- Also check Focus / Do Not Disturb isn't swallowing them.
+
+From a terminal, `/Applications/Merlyn.app/Contents/MacOS/Merlyn --notify-test`
+posts one alert and logs the authorization callback and the permission state.
+
+**`requestAuthorization` fails with "Notifications are not allowed for this
+application"** (`UNErrorDomain Code=1`)
+A bundle id can get stuck in a denied state that nothing clears. Do **not** chase
+the code signature — that was measured and ruled out, along with the entitlements
+blob, duplicate LaunchServices registrations, the usernoted database,
+`com.apple.ncprefs.plist`, `tccutil reset`, and MDM profiles. The same binary under
+a fresh bundle id is granted immediately, so the fix is a new `CFBundleIdentifier`
+in `scripts/bundle.sh`. Full evidence table: `docs/specs/distribution.md`
+§ Notifications.
+
 **Kimi CLI got logged out**
 Kimi's refresh tokens rotate, and only Merlyn's own refresh path persists the
 rotated ones correctly. Never hand-edit
@@ -207,13 +244,14 @@ QA flags. These work on any build of the binary — the installed one
 | `--edit` | With `--open`: the list in reorder/delete mode |
 | `--light` | Force the light theme |
 | `--mascot` | Jump straight to the mascot editor |
+| `--notify-test` | Post one alert and log macOS's verdict on it |
 
 Paths:
 
 - Config: `~/Library/Application Support/Merlyn/providers.json`
 - Parse cache: `~/Library/Application Support/Merlyn/usage-cache.json` (safe to delete)
 - Build output: `build/Merlyn.app` in the checkout
-- Bundle id: `sh.micky.merlyn` — keep it stable; the Keychain grant is tied to it
+- Bundle id: `com.mickyngub.merlyn` — keep it stable; the Keychain grant is tied to it
 
 Deeper detail: [docs/specs/distribution.md](../../docs/specs/distribution.md) for
 signing, [docs/provider-integration.md](../../docs/provider-integration.md) for

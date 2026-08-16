@@ -13,6 +13,12 @@ enum QAFlags {
     /// and delete buttons, and the drag are otherwise a click away from every
     /// screenshot.
     static let editMode = CommandLine.arguments.contains("--edit")
+    /// `--notify-test` posts one alert at launch and logs what macOS reports back.
+    /// The alert path can fail entirely outside the app (no permission record, an
+    /// alert style of None), and silence looks the same as "nothing crossed a
+    /// limit" — this is the one way to tell them apart without waiting for real
+    /// usage. Bundled app only; the dev binary has no bundle id to deliver to.
+    static let notifyTest = CommandLine.arguments.contains("--notify-test")
     /// Delay before routing an already-open panel to a QA screen: the SwiftUI
     /// host must be mounted so its `openGeneration` onChange fires. Timing-based
     /// because these are QA-only paths — a dropped route on a pathologically slow
@@ -52,6 +58,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panelController.open()
             DispatchQueue.main.asyncAfter(deadline: .now() + QAFlags.railRouteDelay) { [weak self] in
                 self?.panelController.collapseToRail()
+            }
+        }
+        if QAFlags.notifyTest { runNotificationSelfTest() }
+    }
+
+    /// Post one alert and report what the system says about it.
+    ///
+    /// Drives its own authorization request rather than reading the one
+    /// `NotificationManager.init` fired: the answer arrives on a callback that can
+    /// take as long as the user takes to dismiss a prompt, and a request still in
+    /// flight is indistinguishable from one that quietly succeeded. This reports
+    /// the outcome whenever it lands.
+    private func runNotificationSelfTest() {
+        NSLog("Merlyn notify-test: supported = \(MacNotifications.isSupported)")
+        MacNotifications.requestAuthorization { granted, error in
+            NSLog("Merlyn notify-test: requestAuthorization → granted=\(granted) error=\(error.map { "\($0)" } ?? "none")")
+            Task { @MainActor in
+                MacNotifications.permission { state in
+                    NSLog("Merlyn notify-test: permission = \(state)")
+                    MacNotifications.postTest()
+                    // Re-read after posting: the first post is what makes macOS
+                    // register the app, so the state can change underneath us.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        MacNotifications.permission { after in
+                            NSLog("Merlyn notify-test: permission after posting = \(after)")
+                        }
+                    }
+                }
             }
         }
     }

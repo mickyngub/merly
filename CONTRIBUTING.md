@@ -29,6 +29,7 @@ Useful QA flags:
 | `--open --rail` | …collapsed to the mascot rail. |
 | `--open --edit` | …in reorder/delete mode (grips, edit + delete buttons, drag). |
 | `--mascot` | Launch straight into the menu bar mascot editor. |
+| `--notify-test` | Post one alert at launch and log what macOS says about it. Bundled app only — the dev binary has no bundle id to deliver to. |
 
 To assemble a runnable `.app`:
 

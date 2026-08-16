@@ -1,19 +1,23 @@
 #!/bin/bash
 # bundle.sh — build a release binary and assemble "Merlyn.app".
 #
-# Signing is automatic and optional:
-#   • If a "Developer ID Application" certificate is in your keychain, the app
-#     is signed with it + Hardened Runtime (--options runtime) — what
-#     notarization would need, if this project ever shipped binaries.
-#   • Otherwise it is ad-hoc signed, which is the normal path: Merlyn ships as
-#     source, and an app built locally is never quarantined. Only a copy you
-#     *download* hits Gatekeeper, and we publish none.
+# Signing is automatic. In preference order:
+#   • A "Developer ID Application" certificate, + Hardened Runtime (--options
+#     runtime) — what notarization would need, if this project ever shipped
+#     binaries.
+#   • The local self-signed identity from scripts/make-signing-cert.sh. Merlyn
+#     ships as source and a locally built app is never quarantined, so this is
+#     not about Gatekeeper — it is about having a code identity that survives a
+#     rebuild, which is what macOS hangs the notification permission and the
+#     Keychain "Always Allow" grants on.
+#   • Ad-hoc, as a last resort. It runs, but both of those break every build.
 #
 # Overrides (env):
-#   MERLYN_VERSION=1.2   marketing version (CFBundleShortVersionString)
-#   MERLYN_BUILD=7       build number      (CFBundleVersion)
-#   SIGN_IDENTITY="..."  force a specific codesign identity
-#   MERLYN_ADHOC=1       force ad-hoc signing even if a Developer ID exists
+#   MERLYN_VERSION=1.2         marketing version (CFBundleShortVersionString)
+#   MERLYN_BUILD=7             build number      (CFBundleVersion)
+#   SIGN_IDENTITY="..."        force a specific codesign identity
+#   MERLYN_SIGN_IDENTITY="..." rename the local self-signed identity to look for
+#   MERLYN_ADHOC=1             force ad-hoc signing
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -60,7 +64,7 @@ if [ -d "$NESTED" ] && [ ! -f "$NESTED/Contents/Info.plist" ]; then
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
-    <key>CFBundleIdentifier</key><string>sh.micky.merlyn.resources</string>
+    <key>CFBundleIdentifier</key><string>com.mickyngub.merlyn.resources</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Merlyn_Merlyn</string>
     <key>CFBundlePackageType</key><string>BNDL</string>
@@ -79,7 +83,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>
     <string>Merlyn</string>
     <key>CFBundleIdentifier</key>
-    <string>sh.micky.merlyn</string>
+    <string>com.mickyngub.merlyn</string>
     <key>CFBundleName</key>
     <string>Merlyn</string>
     <key>CFBundleIconFile</key>
@@ -105,31 +109,74 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 # ── Signing ────────────────────────────────────────────────────────────────
+# Identity preference: Developer ID → the local self-signed identity → ad-hoc.
+#
+# The middle rung matters more than it looks. Ad-hoc signing gives a designated
+# requirement of `cdhash H"<this build>"`, so every rebuild is a *different app* to
+# macOS and Keychain "Always Allow" is re-prompted forever.
+# scripts/make-signing-cert.sh creates an identity that survives rebuilds.
+#
+# It has no bearing on notifications, despite looking like it should — that was
+# measured. See docs/specs/distribution.md § Notifications.
+#
+# scripts/Merlyn.entitlements is an EMPTY dict, and has to stay literally empty —
+# no XML comments. AMFI's parser rejects them outright ("Failed to parse
+# entitlements: AMFIUnserializeXML: syntax error"), which is why the rationale
+# lives here instead of in the file:
+#
+#   Merlyn runs OUTSIDE the App Sandbox by design — its whole job is reading other
+#   tools' credentials from the login Keychain and their config files under $HOME
+#   (~/.codex, ~/.claude*, ~/.kimi-code), which the sandbox forbids. That is also
+#   why it cannot ship on the Mac App Store as-is. Hardened Runtime IS enabled
+#   (--options runtime) so the app could be notarized, and it needs no exceptions:
+#   Keychain items are read by shelling out to /usr/bin/security rather than the
+#   in-process APIs, file reads are ordinary user-owned dotfiles, and network
+#   access is the default outbound-client behaviour.
 ENTITLEMENTS="scripts/Merlyn.entitlements"
+LOCAL_IDENTITY="${MERLYN_SIGN_IDENTITY:-Merlyn Local Signing}"
 IDENTITY="${SIGN_IDENTITY:-}"
+ADHOC_REASON="forced by MERLYN_ADHOC=1"
 if [ -z "$IDENTITY" ] && [ "${MERLYN_ADHOC:-0}" != "1" ]; then
   IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
     | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n1 || true)"
+  if [ -z "$IDENTITY" ]; then
+    if security find-certificate -c "$LOCAL_IDENTITY" >/dev/null 2>&1; then
+      IDENTITY="$LOCAL_IDENTITY"
+    else
+      ADHOC_REASON="no signing identity found"
+    fi
+  fi
 fi
 
 if [ -n "$IDENTITY" ]; then
-  echo "▶ Signing with Developer ID + Hardened Runtime:"
+  # A timestamp is only meaningful for a signature someone else will verify after
+  # the certificate expires — that is notarisation's concern, not a local build's,
+  # and the timestamp authority is a network round trip on every build.
+  TS="--timestamp"
+  if [ "$IDENTITY" = "$LOCAL_IDENTITY" ]; then
+    TS="--timestamp=none"
+    echo "▶ Signing with the local identity + Hardened Runtime:"
+  else
+    echo "▶ Signing with Developer ID + Hardened Runtime:"
+  fi
   echo "    $IDENTITY"
+  echo "  (First build with a new identity: macOS asks once for Keychain access to"
+  echo "   the signing key — choose Always Allow.)"
   # Sign the nested bundle inside-out first, then the app itself.
   if [ -e "$NESTED" ]; then
-    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$NESTED"
+    codesign --force --options runtime $TS --sign "$IDENTITY" "$NESTED"
   fi
-  codesign --force --options runtime --timestamp \
+  codesign --force --options runtime $TS \
     --entitlements "$ENTITLEMENTS" \
     --sign "$IDENTITY" "$APP"
-  echo "✔ Signed with a real identity. Merlyn ships as source, so there is nothing"
-  echo "  further to package — see docs/specs/distribution.md."
+  echo "✔ Signed with a stable identity, so Keychain grants survive rebuilds."
 else
-  echo "▶ No Developer ID identity found — ad-hoc signing. This is the normal path:"
-  echo "  Merlyn ships as source, and an app you built locally is never quarantined,"
-  echo "  so Gatekeeper won't gate it. macOS will re-ask for Keychain access after"
-  echo "  each rebuild (every build is a new ad-hoc identity). See"
-  echo "  docs/specs/distribution.md for why, and for the self-signed-cert fix."
+  echo "▶ Ad-hoc signing ($ADHOC_REASON)."
+  echo "  Gatekeeper is not the problem — an app you built locally is never"
+  echo "  quarantined. The cost is that every rebuild is a NEW code identity, so"
+  echo "  macOS re-asks for Keychain access after each build."
+  echo "  Fix it once with:  scripts/make-signing-cert.sh"
+  echo "  Background: docs/specs/distribution.md."
   if [ -e "$NESTED" ]; then
     codesign --force --sign - "$NESTED"
   fi

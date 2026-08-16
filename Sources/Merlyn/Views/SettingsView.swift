@@ -18,6 +18,10 @@ struct SettingsView: View {
     /// "" is the auto pick — Picker needs a non-optional tag, and nil in the
     /// config is what "whichever is busiest" means.
     @State private var menuBarProvider: String
+    /// What macOS itself will do with an alert right now. Alerts silently going
+    /// nowhere is the failure this screen exists to make visible — the app can
+    /// post them perfectly and still have no banner drawn.
+    @StateObject private var permission = NotificationPermissionProbe()
     @Environment(\.theme) private var theme
 
     private let accent = Theme.accent
@@ -98,9 +102,13 @@ struct SettingsView: View {
 
                     toggleRow(
                         "Reset alerts",
-                        caption: "Notify when a busy session resets and frees up",
+                        caption: "Notify when a busy limit rolls over and frees up",
                         isOn: $settings.notifyOnReset
                     )
+
+                    Divider().overlay(theme.hairline)
+
+                    deliveryRow
                 }
             }
 
@@ -133,7 +141,89 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: delivery
+
+    /// Whether macOS will actually *show* what Merlyn posts, and a way to prove it.
+    ///
+    /// Posting a notification and having one appear are separate things: macOS
+    /// keys its permission record to the app's code signature, so an alert can be
+    /// delivered flawlessly and still never draw a banner. Without this row the
+    /// only symptom is silence, which reads identically to "nothing crossed a
+    /// limit" — see docs/specs/distribution.md.
+    private var deliveryRow: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: delivery.symbol)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(delivery.tint)
+                Text(delivery.headline)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(delivery.isHealthy ? theme.text2 : delivery.tint)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            if let detail = delivery.detail {
+                Text(detail)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(theme.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if MacNotifications.isSupported {
+                HStack(spacing: 7) {
+                    chipButton("Send a test", filled: delivery.isHealthy) {
+                        MacNotifications.postTest()
+                        // The test itself can flip the state: the very first post
+                        // is what makes macOS register the app.
+                        permission.refresh()
+                    }
+                    if !delivery.isHealthy {
+                        chipButton("Open Notification Settings", filled: false) {
+                            MacNotifications.openSystemSettings()
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .onAppear { permission.refresh() }
+    }
+
+    /// The permission state rendered for a human: what is wrong, and what to do.
+    private var delivery: (symbol: String, tint: Color, headline: String, detail: String?, isHealthy: Bool) {
+        switch permission.permission {
+        case .granted:
+            // Deliberately unhued: the healthy state is the absence of a problem,
+            // and the theme keeps colour for readings, not for reassurance.
+            return ("checkmark.circle.fill", theme.text3, "macOS is showing Merlyn's alerts.", nil, true)
+        case .unsupported:
+            return ("hammer.fill", Color(hex: 0xB5710E), "Alerts need the bundled app.",
+                    "Build it with scripts/bundle.sh — the dev binary has no bundle identifier, so macOS has nothing to deliver to.", false)
+        case .denied:
+            return ("bell.slash.fill", Theme.danger, "Notifications are turned off for Merlyn.",
+                    "Turn them back on in System Settings › Notifications › Merlyn.", false)
+        case .bannersOff:
+            return ("bell.badge.slash.fill", Color(hex: 0xB5710E), "Merlyn's alert style is None.",
+                    "Alerts are delivered but never drawn. Set Merlyn to Banners or Alerts in System Settings › Notifications.", false)
+        case .notDetermined:
+            return ("exclamationmark.triangle.fill", Color(hex: 0xB5710E), "macOS has no permission on record for Merlyn.",
+                    "Alerts will be delivered silently. Send a test to trigger the prompt — if Merlyn still isn't listed in System Settings › Notifications, the build is ad-hoc signed and the grant can't stick (docs/specs/distribution.md).", false)
+        }
+    }
+
     // MARK: pieces
+
+    private func chipButton(_ title: String, filled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: filled ? .semibold : .medium))
+                .foregroundStyle(filled ? Color.white : theme.text2)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(filled ? accent : theme.chip, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+    }
 
     private func section(_ title: String, @ViewBuilder _ content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 10) {

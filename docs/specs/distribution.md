@@ -40,14 +40,15 @@ delete it.
 What the script does:
 
 1. `swift build -c release`, then assembles `build/Merlyn.app` with `Info.plist`
-   (`LSUIElement`, `LSMinimumSystemVersion 14.0`, bundle id `sh.micky.merlyn`).
+   (`LSUIElement`, `LSMinimumSystemVersion 14.0`, bundle id `com.mickyngub.merlyn`).
 2. **Repacks the SwiftPM resource bundle.** SwiftPM emits a *flat* bundle
    (`Resources/`, no `Info.plist`), which `codesign` rejects as "bundle format
    unrecognized". The script rebuilds it in standard `Contents/` layout;
    `Bundle.module` still resolves from `Contents/Resources` at runtime.
-3. **Signs ad-hoc** (`codesign --force --sign -`), since no Developer ID exists.
-   Apple Silicon refuses to execute an entirely unsigned binary, so this is
-   required, not cosmetic.
+3. **Signs.** Apple Silicon refuses to execute an entirely unsigned binary, so this
+   is required, not cosmetic. Identity preference: a Developer ID, else the local
+   self-signed identity (`scripts/make-signing-cert.sh`), else ad-hoc. Prefer not
+   to land on ad-hoc — see the next section for what it costs.
 4. `codesign --verify --strict` as a gate.
 
 The build is **host-native** — Intel and Apple Silicon each produce a binary for
@@ -63,22 +64,65 @@ build>"`, verifiable with:
 codesign -d -r- build/Merlyn.app
 ```
 
-Keychain "Always Allow" grants are keyed to that requirement, so **every rebuild is
-a new identity and macOS re-prompts** for the Claude credentials. This is normal for
-source distribution and is called out in the README so it doesn't read as a
-problem.
+**Keychain "Always Allow" grants** are keyed to that requirement, so macOS
+re-prompts for the Claude credentials after every build.
 
-For local development only, a **self-signed** code-signing identity (Keychain
-Access → Certificate Assistant → Create a Certificate → *Code Signing*) yields a
-stable requirement — `identifier "sh.micky.merlyn" and certificate leaf = H"…"` —
-which survives rebuilds and stops the re-prompting:
+A **self-signed** code-signing identity fixes that. Its requirement is
+`identifier "com.mickyngub.merlyn" and certificate leaf = H"…"`, which survives
+rebuilds:
 
 ```sh
-SIGN_IDENTITY="Merlyn Self-Signed" scripts/bundle.sh
+scripts/make-signing-cert.sh    # once — creates "Merlyn Local Signing"
+scripts/bundle.sh               # picks it up automatically from then on
 ```
 
+The script generates the certificate with `/usr/bin/openssl` (LibreSSL — Homebrew's
+OpenSSL 3 writes a PKCS#12 MAC that `security import` rejects), imports it with
+`-T /usr/bin/codesign`, and trusts it for the codeSign policy with
+`add-trusted-cert -r trustRoot` (`trustAsRoot` is rejected outright: the
+certificate *is* its own root). Trusting it costs one password dialog and is what
+makes `security find-identity -v -p codesigning` report it as valid rather than
+`CSSMERR_TP_NOT_TRUSTED`. The **first** build afterwards pops one Keychain prompt
+for the signing key; choose *Always Allow* and it never asks again.
+
 It does **not** help anyone else: a self-signed leaf is not a trusted anchor, so it
-buys nothing for Gatekeeper and each user would need their own certificate.
+buys nothing for Gatekeeper and each user runs the script once on their own
+machine. Undo with `security delete-certificate -c "Merlyn Local Signing"`.
+
+## Notifications are keyed to the bundle id, not the signature
+
+Worth writing down because the opposite is very plausible and wrong, and the
+failure is silent either way.
+
+`UNUserNotificationCenter.requestAuthorization` can come straight back with
+`UNErrorDomain Code=1 "Notifications are not allowed for this application"`. Alerts
+are then delivered to Notification Center and never drawn, which looks exactly like
+"nothing crossed a limit".
+
+Signing is not the lever. Measured on one machine, same source, same certificate:
+
+| Build | `requestAuthorization` |
+|---|---|
+| ad-hoc signed | Code=1, denied |
+| stable self-signed, untrusted | Code=1, denied |
+| stable self-signed, trusted | Code=1, denied |
+| **same binary, bundle id changed** | **granted** |
+
+Ruled out along the way: the entitlements blob, duplicate LaunchServices
+registrations of the same id from stray `build/Merlyn.app` copies, the
+`group.com.apple.usernoted/db2/db` record store, `com.apple.ncprefs.plist` (no
+entry there for the *granted* id either, so that file is not the store on macOS
+26), `tccutil reset`, and MDM configuration profiles.
+
+So a bundle id can end up in a stuck denied state that survives all of the above.
+The remedy that works is a fresh identifier. Two corollaries:
+
+- `~/Library/Group Containers/group.com.apple.usernoted/db2/db` is a *history*
+  store. Its `presented` / `displayed` columns read 0 even for an app that is
+  granted, so they prove nothing about whether a banner appeared.
+- Diagnose with `Merlyn.app/Contents/MacOS/Merlyn --notify-test`, which posts one
+  alert and logs the authorization callback and the permission state around it.
+  Settings › Alerts shows the same verdict in the UI.
 
 ## CI
 
@@ -101,7 +145,8 @@ run on every push proves nothing their own `swift build` doesn't.
 | `MERLYN_VERSION` | `1.0` | Marketing version → `CFBundleShortVersionString` |
 | `MERLYN_BUILD` | `1` | Build number → `CFBundleVersion` |
 | `SIGN_IDENTITY` | auto-detected | Force a specific codesign identity |
-| `MERLYN_ADHOC` | `0` | `1` = force ad-hoc signing even if a Developer ID exists |
+| `MERLYN_SIGN_IDENTITY` | `Merlyn Local Signing` | Name of the local self-signed identity to create / look for |
+| `MERLYN_ADHOC` | `0` | `1` = force ad-hoc signing even if an identity exists |
 
 `scripts/install.sh` adds `NO_INSTALL`, `NO_LAUNCH` and `MERLYN_REPO`.
 
@@ -130,7 +175,7 @@ than using in-process APIs.
 
 ## Footguns
 
-- **Keep the bundle id `sh.micky.merlyn` stable.** The Keychain grant for Claude
+- **Keep the bundle id `com.mickyngub.merlyn` stable.** The Keychain grant for Claude
   credentials is tied to the app's signature and identity.
 - Should notarization ever come back: it needs network, Hardened Runtime, and **no**
   `get-task-allow` entitlement (release signing omits it automatically). If
