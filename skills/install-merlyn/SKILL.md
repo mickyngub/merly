@@ -106,22 +106,15 @@ It will ask for **Keychain access** to read the Claude Code credentials — clic
 > Keychain, and the "Always Allow" grant for the Claude credentials is asked for
 > again. Say this up front so a returning prompt doesn't read as sinister.
 >
-> **Install once and it costs one prompt, so most people should do nothing.**
-> Someone who rebuilds often can trade it for a stable local identity:
+> **Install once and it costs one prompt, so there is nothing to fix.**
 >
-> ```sh
-> scripts/make-signing-cert.sh   # optional, once per machine
-> ```
->
-> `bundle.sh` and `install.sh` pick it up automatically from then on. It costs one
-> login-password dialog (to trust the certificate) plus one Keychain prompt on the
-> next build — choose **Always Allow** — and the re-prompting stops. It is purely
-> local: it does nothing for Gatekeeper, nothing for anyone else's machine, and it
-> is not a step toward shipping binaries. Undo:
-> `security delete-certificate -c "Merlyn Local Signing"`.
->
-> It has **no effect on notifications**, which look like they should be governed by
-> the same thing but are not — see Troubleshooting.
+> If someone proposes curing it with a self-signed code-signing certificate:
+> don't. It was tried and reverted. Signing with a real key makes `codesign` pull
+> a private key out of the login Keychain, so **the build** starts stopping with
+> *"codesign wants to use key …"* — a much more alarming prompt than the one it
+> removes, and it comes back whenever the key's ACL is invalidated. It also needs
+> a login-password dialog to trust the certificate, helps no other machine, and
+> has **no effect on notifications**. Details in `docs/specs/distribution.md`.
 
 ## Update
 

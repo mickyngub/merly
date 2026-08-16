@@ -1,23 +1,19 @@
 #!/bin/bash
 # bundle.sh — build a release binary and assemble "Merlyn.app".
 #
-# Signing is automatic. In preference order:
-#   • A "Developer ID Application" certificate, + Hardened Runtime (--options
-#     runtime) — what notarization would need, if this project ever shipped
-#     binaries.
-#   • The local self-signed identity from scripts/make-signing-cert.sh. Merlyn
-#     ships as source and a locally built app is never quarantined, so this is
-#     not about Gatekeeper — it is about having a code identity that survives a
-#     rebuild, which is what macOS hangs the notification permission and the
-#     Keychain "Always Allow" grants on.
-#   • Ad-hoc, as a last resort. It runs, but both of those break every build.
+# Signing is automatic and optional:
+#   • If a "Developer ID Application" certificate is in your keychain, the app
+#     is signed with it + Hardened Runtime (--options runtime) — what
+#     notarization would need, if this project ever shipped binaries.
+#   • Otherwise it is ad-hoc signed, which is the normal path: Merlyn ships as
+#     source, and an app built locally is never quarantined. Only a copy you
+#     *download* hits Gatekeeper, and we publish none.
 #
 # Overrides (env):
-#   MERLYN_VERSION=1.2         marketing version (CFBundleShortVersionString)
-#   MERLYN_BUILD=7             build number      (CFBundleVersion)
-#   SIGN_IDENTITY="..."        force a specific codesign identity
-#   MERLYN_SIGN_IDENTITY="..." rename the local self-signed identity to look for
-#   MERLYN_ADHOC=1             force ad-hoc signing
+#   MERLYN_VERSION=1.2   marketing version (CFBundleShortVersionString)
+#   MERLYN_BUILD=7       build number      (CFBundleVersion)
+#   SIGN_IDENTITY="..."  force a specific codesign identity
+#   MERLYN_ADHOC=1       force ad-hoc signing even if a Developer ID exists
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -109,15 +105,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 # ── Signing ────────────────────────────────────────────────────────────────
-# Identity preference: Developer ID → the local self-signed identity → ad-hoc.
-#
-# The middle rung matters more than it looks. Ad-hoc signing gives a designated
-# requirement of `cdhash H"<this build>"`, so every rebuild is a *different app* to
-# macOS and Keychain "Always Allow" is re-prompted forever.
-# scripts/make-signing-cert.sh creates an identity that survives rebuilds.
-#
-# It has no bearing on notifications, despite looking like it should — that was
-# measured. See docs/specs/distribution.md § Notifications.
+# Developer ID if one exists, otherwise ad-hoc. There is deliberately no local
+# self-signed rung: a self-signed identity would spare the Keychain re-prompt on
+# rebuild, but using it makes `codesign` ask permission to use its private key,
+# and a build that stops to demand Keychain access is a far worse thing to hand a
+# user than a prompt they already understand. See docs/specs/distribution.md.
 #
 # scripts/Merlyn.entitlements is an EMPTY dict, and has to stay literally empty —
 # no XML comments. AMFI's parser rejects them outright ("Failed to parse
@@ -133,50 +125,30 @@ PLIST
 #   in-process APIs, file reads are ordinary user-owned dotfiles, and network
 #   access is the default outbound-client behaviour.
 ENTITLEMENTS="scripts/Merlyn.entitlements"
-LOCAL_IDENTITY="${MERLYN_SIGN_IDENTITY:-Merlyn Local Signing}"
 IDENTITY="${SIGN_IDENTITY:-}"
-ADHOC_REASON="forced by MERLYN_ADHOC=1"
 if [ -z "$IDENTITY" ] && [ "${MERLYN_ADHOC:-0}" != "1" ]; then
   IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
     | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n1 || true)"
-  if [ -z "$IDENTITY" ]; then
-    if security find-certificate -c "$LOCAL_IDENTITY" >/dev/null 2>&1; then
-      IDENTITY="$LOCAL_IDENTITY"
-    else
-      ADHOC_REASON="no signing identity found"
-    fi
-  fi
 fi
 
 if [ -n "$IDENTITY" ]; then
-  # A timestamp is only meaningful for a signature someone else will verify after
-  # the certificate expires — that is notarisation's concern, not a local build's,
-  # and the timestamp authority is a network round trip on every build.
-  TS="--timestamp"
-  if [ "$IDENTITY" = "$LOCAL_IDENTITY" ]; then
-    TS="--timestamp=none"
-    echo "▶ Signing with the local identity + Hardened Runtime:"
-  else
-    echo "▶ Signing with Developer ID + Hardened Runtime:"
-  fi
+  echo "▶ Signing with Developer ID + Hardened Runtime:"
   echo "    $IDENTITY"
-  echo "  (First build with a new identity: macOS asks once for Keychain access to"
-  echo "   the signing key — choose Always Allow.)"
   # Sign the nested bundle inside-out first, then the app itself.
   if [ -e "$NESTED" ]; then
-    codesign --force --options runtime $TS --sign "$IDENTITY" "$NESTED"
+    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$NESTED"
   fi
-  codesign --force --options runtime $TS \
+  codesign --force --options runtime --timestamp \
     --entitlements "$ENTITLEMENTS" \
     --sign "$IDENTITY" "$APP"
-  echo "✔ Signed with a stable identity, so Keychain grants survive rebuilds."
+  echo "✔ Signed with a real identity. Merlyn ships as source, so there is nothing"
+  echo "  further to package — see docs/specs/distribution.md."
 else
-  echo "▶ Ad-hoc signing ($ADHOC_REASON)."
-  echo "  Gatekeeper is not the problem — an app you built locally is never"
-  echo "  quarantined. The cost is that every rebuild is a NEW code identity, so"
-  echo "  macOS re-asks for Keychain access after each build."
-  echo "  Fix it once with:  scripts/make-signing-cert.sh"
-  echo "  Background: docs/specs/distribution.md."
+  echo "▶ No Developer ID identity found — ad-hoc signing. This is the normal path:"
+  echo "  Merlyn ships as source, and an app you built locally is never quarantined,"
+  echo "  so Gatekeeper won't gate it. macOS will re-ask for Keychain access after"
+  echo "  each rebuild (every build is a new ad-hoc identity). See"
+  echo "  docs/specs/distribution.md for why."
   if [ -e "$NESTED" ]; then
     codesign --force --sign - "$NESTED"
   fi

@@ -9,7 +9,6 @@ Native macOS menu bar app (Swift/AppKit + SwiftUI) showing AI agent quota usage 
 - `.build/debug/Merlyn --print` — headless snapshot of all readers (fast smoke test, no UI)
 - `.build/debug/Merlyn --open [--expand|--light|--rail|--edit]` — launch with QA flags (panel open / cards expanded / forced light theme / collapsed rail / reorder mode)
 - `.build/debug/Merlyn --mascot` — launch straight to the app-mascot editor (the Merlyn critter beside the panel title)
-- `scripts/make-signing-cert.sh` — optional, once per machine: a stable local signing identity, so the Keychain stops re-prompting every rebuild (see Footguns)
 - `scripts/bundle.sh` — release build + assemble `build/Merlyn.app`
 - `Merlyn.app/Contents/MacOS/Merlyn --notify-test` — post one alert and log macOS's verdict on it (bundled app only)
 
@@ -30,7 +29,7 @@ See [docs/provider-integration.md](docs/provider-integration.md) for exact auth 
 
 - **Kimi refresh tokens rotate.** Any refresh MUST hold the `oauth/kimi-code` flock and atomically persist new creds to `credentials/kimi-code.json`, or the user's Kimi CLI login breaks.
 - **Never refresh Claude/Codex tokens.** Risk of racing the CLIs' own refresh; on expiry, fall back to estimates and let the CLI re-auth on next use.
-- Keychain "Always Allow" is tied to the binary's code signature — every ad-hoc rebuild re-prompts. Expected during dev; `scripts/make-signing-cert.sh` once stops it, and `bundle.sh` picks the identity up automatically. Nothing is ever signed *for* distribution — the project ships source, and each machine signs its own build (ad-hoc if it has no identity, because Apple Silicon won't run an unsigned binary at all).
+- Keychain "Always Allow" is tied to the binary's code signature — every ad-hoc rebuild re-prompts. Expected during dev. **Don't "fix" it with a self-signed identity**: that makes `codesign` need a private key, so the *build* starts demanding Keychain access, which is a worse prompt than the one it removes. Tried and reverted — see [docs/specs/distribution.md](docs/specs/distribution.md). Nothing is ever signed *for* distribution; each machine signs its own build (ad-hoc, because Apple Silicon won't run an unsigned binary at all).
 - **Notification permission is keyed to the bundle id, not the signature.** A refused `requestAuthorization` (`UNErrorDomain Code=1`) delivers alerts that are never drawn — identical, from the outside, to "nothing crossed a limit". Signing, entitlements, LaunchServices duplicates, the usernoted db, ncprefs and `tccutil` were all measured and ruled out; only a fresh `CFBundleIdentifier` cleared it. Evidence table in [docs/specs/distribution.md](docs/specs/distribution.md) § Notifications. Check state with `--notify-test` or the Settings › Alerts row — never assume silence means "under the limit".
 - Estimated fallback percentages are relative to the user's busiest period, not real quota — the UI marks them with `≈`.
 - Readers run off-main-thread via `UsageEngine.workQueue`; keep file I/O and HTTP out of views.

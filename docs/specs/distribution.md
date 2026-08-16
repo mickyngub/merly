@@ -45,10 +45,9 @@ What the script does:
    (`Resources/`, no `Info.plist`), which `codesign` rejects as "bundle format
    unrecognized". The script rebuilds it in standard `Contents/` layout;
    `Bundle.module` still resolves from `Contents/Resources` at runtime.
-3. **Signs.** Apple Silicon refuses to execute an entirely unsigned binary, so this
-   is required, not cosmetic. Identity preference: a Developer ID, else the local
-   self-signed identity (`scripts/make-signing-cert.sh`), else ad-hoc. Prefer not
-   to land on ad-hoc — see the next section for what it costs.
+3. **Signs ad-hoc** (`codesign --force --sign -`), since no Developer ID exists.
+   Apple Silicon refuses to execute an entirely unsigned binary, so this is
+   required, not cosmetic.
 4. `codesign --verify --strict` as a gate.
 
 The build is **host-native** — Intel and Apple Silicon each produce a binary for
@@ -64,37 +63,37 @@ build>"`, verifiable with:
 codesign -d -r- build/Merlyn.app
 ```
 
-**Keychain "Always Allow" grants** are keyed to that requirement, so macOS
-re-prompts for the Claude credentials after every build.
+**Keychain "Always Allow" grants** are keyed to that requirement, so **every rebuild
+is a new identity and macOS re-prompts** for the Claude credentials. This is normal
+for source distribution and is called out in the README so it doesn't read as a
+problem.
 
-> Nothing here is about *distribution*. The project signs no artifact — each
-> machine signs its own build, and the signature never leaves it. Signing happens
-> regardless because Apple Silicon will not execute an unsigned binary, so "no
-> certificate" means ad-hoc, not unsigned. Everything below is local
-> quality-of-life for whoever rebuilds a lot, and is **optional**: install once and
-> the re-prompt costs one click.
+Nothing here is about *distribution*. The project signs no artifact — each machine
+signs its own build and the signature never leaves it. Signing happens regardless
+because Apple Silicon will not execute an unsigned binary, so "no certificate"
+means ad-hoc, not unsigned.
 
-A **self-signed** code-signing identity fixes that. Its requirement is
-`identifier "com.mickyngub.merlyn" and certificate leaf = H"…"`, which survives
-rebuilds:
+### Don't "fix" it with a self-signed identity
 
-```sh
-scripts/make-signing-cert.sh    # once — creates "Merlyn Local Signing"
-scripts/bundle.sh               # picks it up automatically from then on
-```
+A self-signed code-signing certificate does give a stable designated requirement
+(`identifier "com.mickyngub.merlyn" and certificate leaf = H"…"`) and does stop the
+Claude re-prompt. **It was tried and reverted**, because the cure is worse:
 
-The script generates the certificate with `/usr/bin/openssl` (LibreSSL — Homebrew's
-OpenSSL 3 writes a PKCS#12 MAC that `security import` rejects), imports it with
-`-T /usr/bin/codesign`, and trusts it for the codeSign policy with
-`add-trusted-cert -r trustRoot` (`trustAsRoot` is rejected outright: the
-certificate *is* its own root). Trusting it costs one password dialog and is what
-makes `security find-identity -v -p codesigning` report it as valid rather than
-`CSSMERR_TP_NOT_TRUSTED`. The **first** build afterwards pops one Keychain prompt
-for the signing key; choose *Always Allow* and it never asks again.
+- Signing with a real key means `codesign` has to *use a private key from your
+  login Keychain*, and macOS gates that — so **the build itself** stops with
+  *"codesign wants to use key …"*. A build that demands Keychain access looks far
+  more alarming than the credential prompt it was meant to remove, and it recurs
+  whenever the key's ACL or partition list is invalidated (adding the trust
+  setting does exactly that).
+- Trusting the certificate needs a login-password dialog of its own, otherwise
+  `security find-identity -v -p codesigning` reports `CSSMERR_TP_NOT_TRUSTED`.
+- It helps nobody else: a self-signed leaf is not a trusted anchor, so it does
+  nothing for Gatekeeper, and every user would have to mint their own.
+- It does **not** affect notifications, which is what it was reached for in the
+  first place. See § Notifications.
 
-It does **not** help anyone else: a self-signed leaf is not a trusted anchor, so it
-buys nothing for Gatekeeper and each user runs the script once on their own
-machine. Undo with `security delete-certificate -c "Merlyn Local Signing"`.
+Net: two scary dialogs and a keychain modification, to remove one familiar prompt
+that a normal install shows once. Ad-hoc is the right default.
 
 ## Notifications are keyed to the bundle id, not the signature
 
@@ -152,8 +151,7 @@ run on every push proves nothing their own `swift build` doesn't.
 | `MERLYN_VERSION` | `1.0` | Marketing version → `CFBundleShortVersionString` |
 | `MERLYN_BUILD` | `1` | Build number → `CFBundleVersion` |
 | `SIGN_IDENTITY` | auto-detected | Force a specific codesign identity |
-| `MERLYN_SIGN_IDENTITY` | `Merlyn Local Signing` | Name of the local self-signed identity to create / look for |
-| `MERLYN_ADHOC` | `0` | `1` = force ad-hoc signing even if an identity exists |
+| `MERLYN_ADHOC` | `0` | `1` = force ad-hoc signing even if a Developer ID exists |
 
 `scripts/install.sh` adds `NO_INSTALL`, `NO_LAUNCH` and `MERLYN_REPO`.
 
