@@ -145,6 +145,10 @@ struct AddProviderForm: View {
             RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .strokeBorder(theme.cardBorder, lineWidth: 1)
         )
+        // Opts back in to the focus rings PanelRootView switches off for the rest
+        // of the panel — this is the one screen with text fields, where the ring
+        // is the only indication of where typing will land.
+        .focusEffectDisabled(false)
         .onChange(of: dir, initial: true) { _, newDir in
             dirExists = engine.directoryExists(newDir)
         }

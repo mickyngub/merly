@@ -285,11 +285,6 @@ struct IconButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .pointerCursor()
-        // Hover is this button's feedback; a focus ring on top of it says
-        // "selected" about a glyph nobody selected. Disabled per-button rather
-        // than on the panel, so the add/edit form's text fields keep theirs —
-        // there the ring is the only thing saying where typing will go.
-        .focusEffectDisabled()
     }
 }
 

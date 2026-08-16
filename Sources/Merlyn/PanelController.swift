@@ -414,6 +414,15 @@ struct PanelRootView: View {
         .overlay(alignment: onLeading ? .leading : .trailing) {
             HandleButton(pointingLeading: !onLeading, action: onDismiss)
         }
+        // Kill focus rings across the whole panel in one place rather than per
+        // button. SwiftUI focuses the first control in a window as it appears —
+        // here the header mascot — and rings it in blue, which reads as "selected"
+        // on chrome nobody selected. Every control in the panel already answers
+        // to hover, so none of them needs a second, louder state.
+        //
+        // The add/edit form opts back in: in a text field the ring is not
+        // decoration, it is the only thing saying where typing will land.
+        .focusEffectDisabled()
         .environment(\.theme, theme)
     }
 }
@@ -509,8 +518,6 @@ struct HandleButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .pointerCursor()
-        // See IconButton: the tab is chrome, and a ring around it reads as state.
-        .focusEffectDisabled()
         .help("Hide Merlyn — the menu bar icon brings it back")
     }
 }
