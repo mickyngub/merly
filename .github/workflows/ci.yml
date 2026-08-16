@@ -15,8 +15,14 @@ concurrency:
 
 jobs:
   build:
-    name: Build & test (macOS 14)
-    runs-on: macos-14
+    name: Build & test
+    # NOT macos-14: that runner ships Swift 5.10, which rejects code this project
+    # builds fine against locally (default actor-isolation inference changed in
+    # Swift 6.2+). CI was red for months over the mismatch alone. The macOS 14
+    # *floor* is enforced by `.macOS(.v14)` in Package.swift — the compiler checks
+    # API availability against the deployment target, not the runner's OS — so
+    # building on a newer runner still proves Sonoma compatibility.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
