@@ -40,7 +40,7 @@ delete it.
 What the script does:
 
 1. `swift build -c release`, then assembles `build/Merlyn.app` with `Info.plist`
-   (`LSUIElement`, `LSMinimumSystemVersion 14.0`, bundle id `com.mickyngub.merlyn`).
+   (`LSUIElement`, `LSMinimumSystemVersion 14.0`, bundle id `sh.micky.merlyn`).
 2. **Repacks the SwiftPM resource bundle.** SwiftPM emits a *flat* bundle
    (`Resources/`, no `Info.plist`), which `codesign` rejects as "bundle format
    unrecognized". The script rebuilds it in standard `Contents/` layout;
@@ -76,7 +76,7 @@ means ad-hoc, not unsigned.
 ### Don't "fix" it with a self-signed identity
 
 A self-signed code-signing certificate does give a stable designated requirement
-(`identifier "com.mickyngub.merlyn" and certificate leaf = H"…"`) and does stop the
+(`identifier "sh.micky.merlyn" and certificate leaf = H"…"`) and does stop the
 Claude re-prompt. **It was tried and reverted**, because the cure is worse:
 
 - Signing with a real key means `codesign` has to *use a private key from your
@@ -95,40 +95,63 @@ Claude re-prompt. **It was tried and reverted**, because the cure is worse:
 Net: two scary dialogs and a keychain modification, to remove one familiar prompt
 that a normal install shows once. Ad-hoc is the right default.
 
-## Notifications are keyed to the bundle id, not the signature
+## Notifications: the answer is always the permission, and the bundle id owns it
 
-Worth writing down because the opposite is very plausible and wrong, and the
-failure is silent either way.
+Worth writing down, because this cost a very long debugging session and every
+intuition along the way was wrong.
 
 `UNUserNotificationCenter.requestAuthorization` can come straight back with
 `UNErrorDomain Code=1 "Notifications are not allowed for this application"`. Alerts
 are then delivered to Notification Center and never drawn, which looks exactly like
-"nothing crossed a limit".
+"nothing crossed a limit". **The app cannot tell the difference and neither can
+you** — hence the Settings › Alerts row and `--notify-test`.
 
-Signing is not the lever. Measured on one machine, same source, same certificate:
+**It means what it says: the user has not granted permission.** Nothing in the
+build fixes it. What actually resolved it was the user allowing notifications for
+Merlyn, after which the same binary read `granted` immediately.
 
-| Build | `requestAuthorization` |
+Things that look like the cause and are not — each measured, so don't re-run them:
+
+| Tried | Result |
 |---|---|
-| ad-hoc signed | Code=1, denied |
-| stable self-signed, untrusted | Code=1, denied |
-| stable self-signed, trusted | Code=1, denied |
-| **same binary, bundle id changed** | **granted** |
+| ad-hoc vs. stable self-signed vs. trusted self-signed | denied in all three |
+| dropping the entitlements blob | denied |
+| unregistering duplicate `build/Merlyn.app` copies from LaunchServices | denied |
+| deleting the app's row from `usernoted/db2/db` + restarting the daemons | denied (and see the warning below) |
+| `tccutil reset All <id>` | denied |
+| MDM configuration profiles | none installed |
 
-Ruled out along the way: the entitlements blob, duplicate LaunchServices
-registrations of the same id from stray `build/Merlyn.app` copies, the
-`group.com.apple.usernoted/db2/db` record store, `com.apple.ncprefs.plist` (no
-entry there for the *granted* id either, so that file is not the store on macOS
-26), `tccutil reset`, and MDM configuration profiles.
+### Never change `CFBundleIdentifier` to try to fix this
 
-So a bundle id can end up in a stuck denied state that survives all of the above.
-The remedy that works is a fresh identifier. Two corollaries:
+The permission belongs to the bundle id. A fresh id starts unauthorized, so a
+rename **throws the grant away** and lands you back on `Code=1` — with no prompt,
+because on this macOS the prompt does not reliably reappear for an id it has
+already refused. That is exactly what happened here: the id was renamed mid-debug,
+the user then granted permission to *Merlyn*, and the running app stayed denied
+until the id was put back to `sh.micky.merlyn`. Keep it stable.
 
-- `~/Library/Group Containers/group.com.apple.usernoted/db2/db` is a *history*
-  store. Its `presented` / `displayed` columns read 0 even for an app that is
-  granted, so they prove nothing about whether a banner appeared.
-- Diagnose with `Merlyn.app/Contents/MacOS/Merlyn --notify-test`, which posts one
-  alert and logs the authorization callback and the permission state around it.
-  Settings › Alerts shows the same verdict in the UI.
+### Don't go digging in the notification database
+
+`~/Library/Group Containers/group.com.apple.usernoted/db2/db` is a *history* store,
+not the permission store. Two traps:
+
+- Its `presented` / `displayed` columns read 0 even for an app that is granted, so
+  they prove nothing about whether a banner appeared. They are not evidence.
+- Deleting rows and restarting `usernoted` does not clear a denial, and appeared to
+  leave new-app registration wedged afterwards. There is nothing to win here.
+
+`com.apple.ncprefs.plist` holds no entry for Merlyn even when granted, so it is not
+the store on macOS 26 either — don't read state out of it.
+
+### How to check
+
+```sh
+/Applications/Merlyn.app/Contents/MacOS/Merlyn --notify-test
+```
+
+Posts one alert and logs the authorization callback plus the permission state
+either side of it. Settings › Alerts shows the same verdict in the UI. If it says
+denied, the fix is in System Settings › Notifications › Merlyn — not in this repo.
 
 ## CI
 
@@ -180,7 +203,7 @@ than using in-process APIs.
 
 ## Footguns
 
-- **Keep the bundle id `com.mickyngub.merlyn` stable.** The Keychain grant for Claude
+- **Keep the bundle id `sh.micky.merlyn` stable.** The Keychain grant for Claude
   credentials is tied to the app's signature and identity.
 - Should notarization ever come back: it needs network, Hardened Runtime, and **no**
   `get-task-allow` entitlement (release signing omits it automatically). If

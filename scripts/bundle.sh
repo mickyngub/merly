@@ -60,7 +60,7 @@ if [ -d "$NESTED" ] && [ ! -f "$NESTED/Contents/Info.plist" ]; then
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key><string>en</string>
-    <key>CFBundleIdentifier</key><string>com.mickyngub.merlyn.resources</string>
+    <key>CFBundleIdentifier</key><string>sh.micky.merlyn.resources</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Merlyn_Merlyn</string>
     <key>CFBundlePackageType</key><string>BNDL</string>
@@ -79,7 +79,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>
     <string>Merlyn</string>
     <key>CFBundleIdentifier</key>
-    <string>com.mickyngub.merlyn</string>
+    <string>sh.micky.merlyn</string>
     <key>CFBundleName</key>
     <string>Merlyn</string>
     <key>CFBundleIconFile</key>

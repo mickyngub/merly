@@ -22,7 +22,7 @@ final class UsageEngine: ObservableObject {
     /// Whether the queued mid-pass refresh was user-initiated, so a forced click
     /// during an in-flight pass isn't downgraded to a background poll.
     private var pendingForce = false
-    private let workQueue = DispatchQueue(label: "com.mickyngub.merlyn.engine", qos: .utility)
+    private let workQueue = DispatchQueue(label: "sh.micky.merlyn.engine", qos: .utility)
 
     init() {
         appConfig = ConfigStore.load()

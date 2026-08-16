@@ -196,12 +196,18 @@ posts one alert and logs the authorization callback and the permission state.
 
 **`requestAuthorization` fails with "Notifications are not allowed for this
 application"** (`UNErrorDomain Code=1`)
-A bundle id can get stuck in a denied state that nothing clears. Do **not** chase
-the code signature — that was measured and ruled out, along with the entitlements
-blob, duplicate LaunchServices registrations, the usernoted database,
-`com.apple.ncprefs.plist`, `tccutil reset`, and MDM profiles. The same binary under
-a fresh bundle id is granted immediately, so the fix is a new `CFBundleIdentifier`
-in `scripts/bundle.sh`. Full evidence table: `docs/specs/distribution.md`
+It means exactly what it says: **the permission has not been granted**. Grant it —
+allow notifications for Merlyn — and the same binary reads `granted` at once.
+
+Do **not** go hunting for a technical cause. Every one of these was measured and
+ruled out over a long session: the code signature (ad-hoc, self-signed, and
+self-signed-and-trusted all behaved identically), the entitlements blob, duplicate
+LaunchServices registrations, the usernoted database, `com.apple.ncprefs.plist`,
+`tccutil reset`, and MDM profiles.
+
+And **never change `CFBundleIdentifier` to fix it** — the grant hangs off the id, so
+a rename throws it away and the prompt does not reliably come back. That mistake is
+what made this look unfixable. Full write-up: `docs/specs/distribution.md`
 § Notifications.
 
 **Kimi CLI got logged out**
@@ -242,7 +248,7 @@ Paths:
 - Config: `~/Library/Application Support/Merlyn/providers.json`
 - Parse cache: `~/Library/Application Support/Merlyn/usage-cache.json` (safe to delete)
 - Build output: `build/Merlyn.app` in the checkout
-- Bundle id: `com.mickyngub.merlyn` — keep it stable; the Keychain grant is tied to it
+- Bundle id: `sh.micky.merlyn` — keep it stable; the Keychain grant is tied to it
 
 Deeper detail: [docs/specs/distribution.md](../../docs/specs/distribution.md) for
 signing, [docs/provider-integration.md](../../docs/provider-integration.md) for
