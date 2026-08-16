@@ -74,7 +74,7 @@ struct AppConfig: Codable {
         set { defaultMascot = newValue }
     }
 
-    /// Every coding CLI Merlyn can set up out of the box, paired with the on-disk
+    /// Every coding CLI Merly can set up out of the box, paired with the on-disk
     /// markers that prove the CLI is actually configured. Markers are specific
     /// files (not just the dir), so a dir that merely holds a symlinked
     /// `skills/` folder isn't mistaken for a real install. Drives both the

@@ -171,7 +171,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// (`gaugeTooltip`) because the collapsed rail draws the same bar and must say
     /// the same thing; only the "which provider" clause is the menu bar's own.
     private static func tooltip(for snapshot: ProviderSnapshot?, pinned: Bool) -> String {
-        guard let snapshot else { return "Merlyn — no providers configured" }
+        guard let snapshot else { return "Merly — no providers configured" }
         return snapshot.gaugeTooltip(qualifier: pinned ? "" : " (busiest provider)")
     }
 
@@ -393,7 +393,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(mascot)
 
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Merlyn", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Merly", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quit.target = NSApp
         menu.addItem(quit)
 

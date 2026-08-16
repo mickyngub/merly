@@ -1,4 +1,4 @@
-# Merlyn
+# Merly
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)](#install)
@@ -8,7 +8,7 @@ A native macOS menu bar app that tracks how much of your AI coding agent quota y
 
 Each provider gets a cute 8-bit pixel critter whose **mood tracks your usage**: `CHILL` → `OK` → `BUSY` → `FRIED`. They idle-bob, blink, and hop when you poke them.
 
-> **Unofficial project.** Merlyn is a third-party tool and is **not affiliated with, endorsed by, or sponsored by** Anthropic, OpenAI, or Moonshot AI. "Claude", "Codex", "Kimi", and related names and mascots are trademarks of their respective owners, used here only to identify the services whose usage Merlyn displays. Merlyn only *reads* usage data these tools already store on your Mac — see [Privacy & security](#privacy--security).
+> **Unofficial project.** Merly is a third-party tool and is **not affiliated with, endorsed by, or sponsored by** Anthropic, OpenAI, or Moonshot AI. "Claude", "Codex", "Kimi", and related names and mascots are trademarks of their respective owners, used here only to identify the services whose usage Merly displays. Merly only *reads* usage data these tools already store on your Mac — see [Privacy & security](#privacy--security).
 
 ## What it looks like
 
@@ -19,27 +19,27 @@ Each provider gets a cute 8-bit pixel critter whose **mood tracks your usage**: 
 
 ## Install
 
-**Merlyn is distributed as source you build yourself.** There are no prebuilt downloads — see [why](#why-no-download) below.
+**Merly is distributed as source you build yourself.** There are no prebuilt downloads — see [why](#why-no-download) below.
 
 Requires **macOS 14 (Sonoma) or newer** and a **Swift 5.9+ toolchain** (Xcode 15+, or just the Command Line Tools: `xcode-select --install`). No other dependencies.
 
 ```sh
-git clone https://github.com/mickyngub/merlyn.git
-cd merlyn
+git clone https://github.com/mickyngub/merly.git
+cd merly
 scripts/install.sh
 ```
 
-`install.sh` checks your macOS and Swift versions, builds (~40s), quits any running copy, installs to `/Applications`, and launches. Re-run it any time to reinstall; `scripts/install.sh --update` pulls first. To do it by hand instead: `scripts/bundle.sh`, then `cp -R build/Merlyn.app /Applications/`.
+`install.sh` checks your macOS and Swift versions, builds (~40s), quits any running copy, installs to `/Applications`, and launches. Re-run it any time to reinstall; `scripts/install.sh --update` pulls first. To do it by hand instead: `scripts/bundle.sh`, then `cp -R build/Merly.app /Applications/`.
 
-That's it — no Gatekeeper warning, because an app you compiled locally is never quarantined. Merlyn is a menu bar app with no Dock icon, so look up top.
+That's it — no Gatekeeper warning, because an app you compiled locally is never quarantined. Merly is a menu bar app with no Dock icon, so look up top.
 
-**Using an AI coding agent?** This repo ships an `install-merlyn` [agent skill](skills/install-merlyn/SKILL.md). Install it into Claude Code, Codex, or any agent the [skills CLI](https://github.com/vercel-labs/skills) supports:
+**Using an AI coding agent?** This repo ships an `install-merly` [agent skill](skills/install-merly/SKILL.md). Install it into Claude Code, Codex, or any agent the [skills CLI](https://github.com/vercel-labs/skills) supports:
 
 ```sh
-npx skills add mickyngub/merlyn
+npx skills add mickyngub/merly
 ```
 
-Then just ask your agent to install, update, or troubleshoot Merlyn — it'll know the flags, config paths, and the usual failure modes.
+Then just ask your agent to install, update, or troubleshoot Merly — it'll know the flags, config paths, and the usual failure modes.
 
 On first launch it asks for **Keychain access** to read the Claude Code credentials — click **Always Allow**.
 
@@ -53,9 +53,9 @@ A signed, notarized app needs an Apple Developer Program membership ($99/yr). Wi
 
 ```sh
 swift build
-.build/debug/Merlyn --print     # headless snapshot of all readers (no UI)
-.build/debug/Merlyn --open      # run with the panel open
-.build/debug/Merlyn --mascot    # jump to the mascot editor
+.build/debug/Merly --print     # headless snapshot of all readers (no UI)
+.build/debug/Merly --open      # run with the panel open
+.build/debug/Merly --mascot    # jump to the mascot editor
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev loop and [docs/specs/distribution.md](docs/specs/distribution.md) for how the app bundle is assembled and signed.
@@ -70,13 +70,13 @@ All providers show **real, provider-reported rate limits** — the same numbers 
 | Codex | `~/.codex/auth.json` ChatGPT OAuth token | `chatgpt.com/backend-api/wham/usage` → 5h + weekly windows, per-model extras, plan type |
 | Kimi | `~/.kimi-code/credentials/kimi-code.json` (15-min tokens; refreshed with the CLI's own lockfile protocol, rotated creds persisted back) | `api.kimi.com/coding/v1/usages` → weekly + rate-limit windows |
 
-Merlyn never sends tokens anywhere except the provider's own API.
+Merly never sends tokens anywhere except the provider's own API.
 
 **Fallback:** if an API is unreachable or a login is stale, the card falls back to local analysis (Codex: last `rate_limits` event in rollout files; Claude/Kimi: token counts from transcripts relative to your busiest period) and marks the ring with `≈`. Pin `sessionTokenLimit` / `weeklyTokenLimit` in the config to make fallback bars absolute.
 
 ## Adding a provider
 
-Click **Add a provider** in the panel (or edit `~/Library/Application Support/Merlyn/providers.json`):
+Click **Add a provider** in the panel (or edit `~/Library/Application Support/Merly/providers.json`):
 
 ```json
 {
@@ -98,7 +98,7 @@ The app picks up config changes on the next refresh (≤60s, or hit the refresh 
 
 ## Privacy & security
 
-Merlyn is a **read-only** usage viewer with no telemetry. It reads tokens that your existing CLIs already store locally, uses each for a single request to that provider's official API, and discards it — nothing is logged or sent anywhere else. It never refreshes Claude/Codex tokens; the one credential file it writes is Kimi's own (required by the CLI's rotation protocol). Full details and vulnerability reporting: [SECURITY.md](SECURITY.md).
+Merly is a **read-only** usage viewer with no telemetry. It reads tokens that your existing CLIs already store locally, uses each for a single request to that provider's official API, and discards it — nothing is logged or sent anywhere else. It never refreshes Claude/Codex tokens; the one credential file it writes is Kimi's own (required by the CLI's rotation protocol). Full details and vulnerability reporting: [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
@@ -110,5 +110,5 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code o
 
 ## Notes
 
-- First launch scans recent history once (~20s in the background); afterwards refreshes are incremental and take milliseconds. The parse cache lives at `~/Library/Application Support/Merlyn/usage-cache.json` and is safe to delete.
+- First launch scans recent history once (~20s in the background); afterwards refreshes are incremental and take milliseconds. The parse cache lives at `~/Library/Application Support/Merly/usage-cache.json` and is safe to delete.
 - Right-click the menu bar item for Refresh / Edit Providers / Quit.

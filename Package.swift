@@ -2,18 +2,18 @@
 import PackageDescription
 
 let package = Package(
-    name: "Merlyn",
+    name: "Merly",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "Merlyn",
-            path: "Sources/Merlyn",
+            name: "Merly",
+            path: "Sources/Merly",
             resources: [.copy("Resources")]
         ),
         .testTarget(
-            name: "MerlynTests",
-            dependencies: ["Merlyn"],
-            path: "Tests/MerlynTests"
+            name: "MerlyTests",
+            dependencies: ["Merly"],
+            path: "Tests/MerlyTests"
         ),
     ]
 )

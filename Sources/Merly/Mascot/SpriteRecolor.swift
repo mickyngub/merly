@@ -91,7 +91,7 @@ extension SpriteSheetStore {
     static func recoloredFrame(name: String, row: Int, col: Int, accentHex: UInt32) -> CGImage? {
         guard let frame = sheet(named: name)?.frame(row: row, col: col) else { return nil }
         // Full-colour designed sheets could opt out of the tint here to keep their
-        // own palette; none do today — the Merlyn wizard included, so its swatches
+        // own palette; none do today — the Merly wizard included, so its swatches
         // recolour it like every other mascot.
         if fullColorSheets.contains(name) { return frame }
         return SpriteRecolor.tint(frame, cacheKey: "\(name)|\(row)|\(col)", accentHex: accentHex)

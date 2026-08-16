@@ -157,7 +157,7 @@ struct FileBucketCache: Codable {
             let data = try JSONEncoder().encode(pruned)
             persist(data, to: AppPaths.cacheFile, what: "usage-cache.json")
         } catch {
-            NSLog("Merlyn: failed to encode usage-cache.json: \(error.localizedDescription)")
+            NSLog("Merly: failed to encode usage-cache.json: \(error.localizedDescription)")
         }
     }
 

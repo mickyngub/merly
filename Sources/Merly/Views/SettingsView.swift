@@ -115,7 +115,7 @@ struct SettingsView: View {
             section("General") {
                 toggleRow(
                     "Launch at login",
-                    caption: "Open Merlyn automatically when you sign in",
+                    caption: "Open Merly automatically when you sign in",
                     isOn: $launchAtLogin
                 )
                 if !LoginItem.isSupported {
@@ -143,7 +143,7 @@ struct SettingsView: View {
 
     // MARK: delivery
 
-    /// Whether macOS will actually *show* what Merlyn posts, and a way to prove it.
+    /// Whether macOS will actually *show* what Merly posts, and a way to prove it.
     ///
     /// Posting a notification and having one appear are separate things: macOS
     /// keys its permission record to the app's code signature, so an alert can be
@@ -194,19 +194,19 @@ struct SettingsView: View {
         case .granted:
             // Deliberately unhued: the healthy state is the absence of a problem,
             // and the theme keeps colour for readings, not for reassurance.
-            return ("checkmark.circle.fill", theme.text3, "macOS is showing Merlyn's alerts.", nil, true)
+            return ("checkmark.circle.fill", theme.text3, "macOS is showing Merly's alerts.", nil, true)
         case .unsupported:
             return ("hammer.fill", Color(hex: 0xB5710E), "Alerts need the bundled app.",
                     "Build it with scripts/bundle.sh — the dev binary has no bundle identifier, so macOS has nothing to deliver to.", false)
         case .denied:
-            return ("bell.slash.fill", Theme.danger, "Notifications are turned off for Merlyn.",
-                    "Turn them back on in System Settings › Notifications › Merlyn.", false)
+            return ("bell.slash.fill", Theme.danger, "Notifications are turned off for Merly.",
+                    "Turn them back on in System Settings › Notifications › Merly.", false)
         case .bannersOff:
-            return ("bell.badge.slash.fill", Color(hex: 0xB5710E), "Merlyn's alert style is None.",
-                    "Alerts are delivered but never drawn. Set Merlyn to Banners or Alerts in System Settings › Notifications.", false)
+            return ("bell.badge.slash.fill", Color(hex: 0xB5710E), "Merly's alert style is None.",
+                    "Alerts are delivered but never drawn. Set Merly to Banners or Alerts in System Settings › Notifications.", false)
         case .notDetermined:
-            return ("exclamationmark.triangle.fill", Color(hex: 0xB5710E), "macOS has no permission on record for Merlyn.",
-                    "Alerts will be delivered silently. Send a test to trigger the prompt — if Merlyn still isn't listed in System Settings › Notifications, the build is ad-hoc signed and the grant can't stick (docs/specs/distribution.md).", false)
+            return ("exclamationmark.triangle.fill", Color(hex: 0xB5710E), "macOS has no permission on record for Merly.",
+                    "Alerts will be delivered silently. Send a test to trigger the prompt — if Merly still isn't listed in System Settings › Notifications, the build is ad-hoc signed and the grant can't stick (docs/specs/distribution.md).", false)
         }
     }
 

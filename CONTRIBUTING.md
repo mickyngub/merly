@@ -1,6 +1,6 @@
-# Contributing to Merlyn
+# Contributing to Merly
 
-Thanks for your interest! Merlyn is a small native macOS menu bar app written in
+Thanks for your interest! Merly is a small native macOS menu bar app written in
 Swift (AppKit + SwiftUI), with no third-party dependencies.
 
 By participating you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
@@ -14,8 +14,8 @@ By participating you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ```sh
 swift build                       # debug build
-.build/debug/Merlyn --print       # headless snapshot of all readers (fast smoke test, no UI)
-.build/debug/Merlyn --open        # launch with the panel open
+.build/debug/Merly --print       # headless snapshot of all readers (fast smoke test, no UI)
+.build/debug/Merly --open        # launch with the panel open
 ```
 
 Useful QA flags:
@@ -34,8 +34,8 @@ Useful QA flags:
 To assemble a runnable `.app`:
 
 ```sh
-scripts/bundle.sh                 # → build/Merlyn.app
-open build/Merlyn.app
+scripts/bundle.sh                 # → build/Merly.app
+open build/Merly.app
 ```
 
 `--print` is the fastest way to check your change didn't break a reader — it
@@ -48,7 +48,7 @@ opening a PR.
 swift test
 ```
 
-The suite (`Tests/MerlynTests/`) covers the pure logic: the token-window
+The suite (`Tests/MerlyTests/`) covers the pure logic: the token-window
 estimator, snapshot lane/gauge derivation, payload parsing against fixture
 transcripts, and the config store's corrupt-file quarantine. It uses XCTest,
 which ships with **Xcode** — on a Command Line Tools-only machine `swift test`
@@ -59,12 +59,12 @@ and CI runs the tests on every pull request.
 
 | Path | What lives there |
 |---|---|
-| `Sources/Merlyn/Data/` | Providers, readers, usage engine, API clients |
-| `Sources/Merlyn/Mascot/` | Pixel-critter builder + sprite-sheet recoloring |
-| `Sources/Merlyn/Views/` | SwiftUI views (dock, cards, editor, settings) |
-| `Sources/Merlyn/Resources/` | Baked sprite sheets |
-| `scripts/` | `bundle.sh` builds `build/Merlyn.app` (repo-only, what CI runs); `install.sh` wraps it and installs to `/Applications`; plus asset generation |
-| `skills/` | Agent skills published for `npx skills add mickyngub/merlyn` |
+| `Sources/Merly/Data/` | Providers, readers, usage engine, API clients |
+| `Sources/Merly/Mascot/` | Pixel-critter builder + sprite-sheet recoloring |
+| `Sources/Merly/Views/` | SwiftUI views (dock, cards, editor, settings) |
+| `Sources/Merly/Resources/` | Baked sprite sheets |
+| `scripts/` | `bundle.sh` builds `build/Merly.app` (repo-only, what CI runs); `install.sh` wraps it and installs to `/Applications`; plus asset generation |
+| `skills/` | Agent skills published for `npx skills add mickyngub/merly` |
 | `docs/` | Provider-integration reference, provider API notes, specs |
 
 Read [`AGENTS.md`](AGENTS.md) for an architecture map and the load-bearing
@@ -99,7 +99,7 @@ Before opening a PR, please make sure:
 
 - [ ] `swift build` succeeds with no new warnings.
 - [ ] `swift test` passes (or let CI run it if you're on Command Line Tools only).
-- [ ] `.build/debug/Merlyn --print` runs without crashing.
+- [ ] `.build/debug/Merly --print` runs without crashing.
 - [ ] No secrets, tokens, or personal paths are added (the app reads
       credentials — never hardcode or log any).
 - [ ] File I/O and HTTP stay **off** the main thread (readers run on
@@ -110,7 +110,7 @@ Keep PRs focused. Describe what changed and how you verified it.
 
 ## Localization
 
-Merlyn is deliberately **English-only** for now: all user-facing strings are
+Merly is deliberately **English-only** for now: all user-facing strings are
 inline literals, and date formatting is pinned to `en_US_POSIX` (formatted
 strings are persisted into cached readings, so a mid-cache locale change would
 mix formats). If you're adding strings, keep them inline — please don't
@@ -119,7 +119,7 @@ would be adopted repo-wide in one pass if it ever lands.
 
 ## Releasing (maintainers)
 
-Merlyn ships as source; there are no release artifacts to publish. How the app
+Merly ships as source; there are no release artifacts to publish. How the app
 bundle is assembled and ad-hoc signed — and what changing that would take — is
 documented in [`docs/specs/distribution.md`](docs/specs/distribution.md).
 

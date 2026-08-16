@@ -14,5 +14,5 @@ The problem it solves or the workflow it improves.
 
 **For a new provider**
 - Does it expose a real, provider-reported usage/rate-limit API? (Required —
-  Merlyn does not support local-log-only estimation as a provider's sole basis.)
+  Merly does not support local-log-only estimation as a provider's sole basis.)
 - Where does the CLI store its credentials, and what's the usage endpoint?

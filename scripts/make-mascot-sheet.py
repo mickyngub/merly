@@ -2,11 +2,11 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow"]
 # ///
-"""Build merlyn-sprite.png (the app mascot mood sheet) from clawd-sprite.png.
+"""Build merly-sprite.png (the app mascot mood sheet) from clawd-sprite.png.
 
 clawd-sprite.png already carries all 8 mood rows x 4 anim frames — registered,
 clean pixels, with the right per-mood eyes and Z/sweat/sparkle accessories. We
-overlay the Merlyn wizard kit (purple hat + gold band, big brown handlebar
+overlay the Merly wizard kit (purple hat + gold band, big brown handlebar
 mustache, wooden staff with a gold orb) on every 128px frame, so the result is a
 perfectly-registered, clean wizard sheet that reuses clawd's mood art.
 
@@ -21,8 +21,8 @@ import pathlib
 from PIL import Image, ImageDraw
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SRC = ROOT / "Sources/Merlyn/Resources/clawd-sprite.png"
-OUT = ROOT / "Sources/Merlyn/Resources/merlyn-sprite.png"
+SRC = ROOT / "Sources/Merly/Resources/clawd-sprite.png"
+OUT = ROOT / "Sources/Merly/Resources/merly-sprite.png"
 
 FW = 128
 BLOCK = 7  # clawd's logical pixel size

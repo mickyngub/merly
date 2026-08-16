@@ -64,9 +64,9 @@ enum MacNotifications {
         UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound]) { granted, error in
                 if let error {
-                    NSLog("Merlyn notifications: authorization failed — \(error.localizedDescription)")
+                    NSLog("Merly notifications: authorization failed — \(error.localizedDescription)")
                 } else if !granted {
-                    NSLog("Merlyn notifications: authorization not granted. Alerts will be delivered silently — check System Settings › Notifications › Merlyn.")
+                    NSLog("Merly notifications: authorization not granted. Alerts will be delivered silently — check System Settings › Notifications › Merly.")
                 }
                 then?(granted, error)
             }
@@ -107,7 +107,7 @@ enum MacNotifications {
             // Dropped errors here are how a broken alert path stays invisible:
             // the app carries on believing it notified the user.
             if let error {
-                NSLog("Merlyn notifications: posting \(id) failed — \(error.localizedDescription)")
+                NSLog("Merly notifications: posting \(id) failed — \(error.localizedDescription)")
             }
         }
     }
@@ -118,13 +118,13 @@ enum MacNotifications {
     /// "no alerts because macOS is swallowing them".
     static func postTest() {
         post(
-            id: "merlyn-test-\(Int(Date().timeIntervalSince1970))",
-            title: "Merlyn",
+            id: "merly-test-\(Int(Date().timeIntervalSince1970))",
+            title: "Merly",
             body: "Test alert — usage notifications are getting through."
         )
     }
 
-    /// Open System Settings straight to the Notifications pane. Merlyn only
+    /// Open System Settings straight to the Notifications pane. Merly only
     /// appears in that list once macOS has an authorization record for it, so a
     /// missing row there is itself the diagnosis.
     static func openSystemSettings() {
@@ -175,7 +175,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// Last reading per provider, keyed by window label.
     private var lastWindows: [String: [String: WindowReading]] = [:]
     /// Providers whose first real reading has been seen. The first pass seeds
-    /// state silently: an account already over the line when Merlyn launches is
+    /// state silently: an account already over the line when Merly launches is
     /// the state of the world, not an event, and firing on it would mean an alert
     /// every single login.
     private var seeded: Set<String> = []
@@ -329,7 +329,7 @@ enum LoginItem {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            NSLog("Merlyn login item: \(error.localizedDescription)")
+            NSLog("Merly login item: \(error.localizedDescription)")
         }
     }
 }

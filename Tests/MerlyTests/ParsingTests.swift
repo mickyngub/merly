@@ -1,5 +1,5 @@
 import XCTest
-@testable import Merlyn
+@testable import Merly
 
 final class APIHelperTests: XCTestCase {
     func testParseAPIDateVariants() {
@@ -65,7 +65,7 @@ final class TranscriptParsingTests: XCTestCase {
 
     override func setUpWithError() throws {
         dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("merlyn-tests-\(UUID().uuidString)")
+            .appendingPathComponent("merly-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     }
 

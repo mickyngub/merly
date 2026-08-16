@@ -1,11 +1,11 @@
 ---
-name: install-merlyn
-description: Install, update, or troubleshoot Merlyn — the macOS menu bar app that tracks Claude/Codex/Kimi agent quota usage with pixel mascots. Merlyn ships as source only (no DMG, no download), so installing means build → /Applications via scripts/install.sh. Use this skill whenever someone wants to install, set up, build, reinstall, update, or upgrade Merlyn, or get it running on a new Mac. Also use it when Merlyn misbehaves after an install — nothing appears in the menu bar, usage alerts never show up, the Keychain prompt keeps coming back after every build, "no providers configured", missing or stale usage numbers, `≈` estimates instead of real limits, or a build that won't compile. Also use it if they describe wanting "that quota mascot app" running.
+name: install-merly
+description: Install, update, or troubleshoot Merly — the macOS menu bar app that tracks Claude/Codex/Kimi agent quota usage with pixel mascots. Merly ships as source only (no DMG, no download), so installing means build → /Applications via scripts/install.sh. Use this skill whenever someone wants to install, set up, build, reinstall, update, or upgrade Merly, or get it running on a new Mac. Also use it when Merly misbehaves after an install — nothing appears in the menu bar, usage alerts never show up, the Keychain prompt keeps coming back after every build, "no providers configured", missing or stale usage numbers, `≈` estimates instead of real limits, or a build that won't compile. Also use it if they describe wanting "that quota mascot app" running.
 ---
 
-# Installing Merlyn
+# Installing Merly
 
-Merlyn is a native macOS menu bar app that reads how much of your AI coding agent
+Merly is a native macOS menu bar app that reads how much of your AI coding agent
 quota you've burned (Claude across multiple accounts, Codex, Kimi) and gives each
 provider a pixel critter whose mood tracks usage.
 
@@ -16,7 +16,7 @@ an app that reads their credential tokens. Building locally is both free and
 friction-free: **an app you compile yourself is never quarantined**, so Gatekeeper
 never gates it. If someone asks where to download it, that's the answer.
 
-Repo: <https://github.com/mickyngub/merlyn>
+Repo: <https://github.com/mickyngub/merly>
 
 ## Install
 
@@ -33,8 +33,8 @@ because an installer that silently moves your HEAD can discard work in progress.
 No checkout yet? Either clone first, or let the script do it:
 
 ```sh
-git clone https://github.com/mickyngub/merlyn.git ~/dev/merlyn
-cd ~/dev/merlyn && scripts/install.sh
+git clone https://github.com/mickyngub/merly.git ~/dev/merly
+cd ~/dev/merly && scripts/install.sh
 ```
 
 Useful variants:
@@ -42,10 +42,10 @@ Useful variants:
 | Command | Effect |
 |---|---|
 | `scripts/install.sh --update` | `git pull --ff-only` first, then build and install |
-| `scripts/install.sh ~/code/merlyn` | Use (or clone into) that directory |
+| `scripts/install.sh ~/code/merly` | Use (or clone into) that directory |
 | `NO_INSTALL=1 scripts/install.sh` | Build only; don't touch `/Applications` |
 | `NO_LAUNCH=1 scripts/install.sh` | Install but don't open the app |
-| `MERLYN_REPO=<url> scripts/install.sh <dir>` | Clone from a fork or mirror instead |
+| `MERLY_REPO=<url> scripts/install.sh <dir>` | Clone from a fork or mirror instead |
 
 The script refuses to proceed on macOS 13 or older, or without a Swift 5.9+
 toolchain — both are hard requirements (`Package.swift` declares `.macOS(.v14)`;
@@ -53,7 +53,7 @@ toolchain — both are hard requirements (`Package.swift` declares `.macOS(.v14)
 `xcode-select --install` is enough; a full Xcode install is not needed.
 
 To do it by hand instead, the whole of it is: `scripts/bundle.sh`, then quit any
-running Merlyn, then `cp -R build/Merlyn.app /Applications/`.
+running Merly, then `cp -R build/Merly.app /Applications/`.
 
 ## Verify headlessly before touching the UI
 
@@ -61,10 +61,10 @@ Run this **before** debugging anything visual. The installed app's own binary ta
 the flag, so this needs no extra build:
 
 ```sh
-/Applications/Merlyn.app/Contents/MacOS/Merlyn --print
+/Applications/Merly.app/Contents/MacOS/Merly --print
 ```
 
-(Working in a checkout instead? `swift build && .build/debug/Merlyn --print`. Note
+(Working in a checkout instead? `swift build && .build/debug/Merly --print`. Note
 that `install.sh` builds *release* only, so `.build/debug/` won't exist until you run
 a plain `swift build`.)
 
@@ -82,7 +82,7 @@ so the first `--print` is slow and later ones take milliseconds.
 
 ## First launch
 
-Merlyn sets `LSUIElement`, so **there is no Dock icon and no window**. Look at the
+Merly sets `LSUIElement`, so **there is no Dock icon and no window**. Look at the
 top of the screen for a small critter with `5h` and `w` bars beneath it. Left-click
 toggles the panel; right-click opens the menu.
 
@@ -91,7 +91,7 @@ It will ask for **Keychain access** to read the Claude Code credentials — clic
 
 > ### That Keychain prompt returns after every rebuild — this is expected
 >
-> Merlyn is never signed *for* distribution: there is no shipped artifact to sign.
+> Merly is never signed *for* distribution: there is no shipped artifact to sign.
 > Each machine signs its own build, locally, with whatever identity that machine
 > has. Signing still happens on every build because Apple Silicon refuses to
 > execute an entirely unsigned binary — so with no certificate present the build is
@@ -99,7 +99,7 @@ It will ask for **Keychain access** to read the Claude Code credentials — clic
 > then a hash of that one binary:
 >
 > ```sh
-> codesign -d -r- /Applications/Merlyn.app   # => cdhash H"..."
+> codesign -d -r- /Applications/Merly.app   # => cdhash H"..."
 > ```
 >
 > Every build produces a different hash, so every build is a new app to the
@@ -136,13 +136,13 @@ Command Line Tools missing or not selected. `xcode-select --install`, then
 Check `swift --version` is 5.9+. Older toolchains fail on syntax the package uses.
 
 **"no providers configured", or cards with no data**
-On first run Merlyn auto-detects installed CLIs by looking for *specific marker
+On first run Merly auto-detects installed CLIs by looking for *specific marker
 files* under `~/.claude*`, `~/.codex`, `~/.kimi-code` — not bare directories, so a
 `skills/`-only folder isn't a false positive. If none of those CLIs are installed
 there is genuinely nothing to report. Otherwise add a provider by hand:
 
 ```sh
-open ~/Library/Application\ Support/Merlyn/providers.json
+open ~/Library/Application\ Support/Merly/providers.json
 ```
 
 ```json
@@ -159,11 +159,11 @@ open ~/Library/Application\ Support/Merlyn/providers.json
 (≤60s) — no restart needed.
 
 **A provider shows an error badge instead of a gauge**
-Deliberate: Merlyn refuses to invent a number it can't read, so a failure gets a
+Deliberate: Merly refuses to invent a number it can't read, so a failure gets a
 badge rather than a 0% gauge that would read as "plenty left". The tooltip and card
 name the cause. If a login lapsed, sign in with that CLI's own command
 (`claude auth login`, `codex login`, `kimi login`) or the panel's sign-in button —
-Merlyn never mints or refreshes tokens itself.
+Merly never mints or refreshes tokens itself.
 
 **Percentages show `≈`**
 Local estimates, not real quota: the API was unreachable or a login is stale, so it
@@ -171,7 +171,7 @@ fell back to analyzing local logs relative to your busiest period. Fix the auth 
 real figures return.
 
 **Nothing in the menu bar**
-Check it's running (`pgrep -fl Merlyn`). If it is, the menu bar is probably full —
+Check it's running (`pgrep -fl Merly`). If it is, the menu bar is probably full —
 on notch Macs, items silently overflow behind the notch. Quit something else up
 there, or use a menu bar manager. There's no Dock icon to fall back on.
 
@@ -179,7 +179,7 @@ there, or use a menu bar manager. There's no Dock icon to fall back on.
 Delete the parse cache; it rebuilds safely (first rescan ~20s):
 
 ```sh
-rm ~/Library/Application\ Support/Merlyn/usage-cache.json
+rm ~/Library/Application\ Support/Merly/usage-cache.json
 ```
 
 **Usage alerts never appear**
@@ -188,16 +188,16 @@ what macOS will do with an alert and has a **Send a test** button — use it bef
 anything else, since silence otherwise looks the same as "nothing crossed a limit".
 
 - *"Notifications are turned off"* / *"alert style is None"* → fix it in System
-  Settings › Notifications › Merlyn (the row's button opens it).
+  Settings › Notifications › Merly (the row's button opens it).
 - Also check Focus / Do Not Disturb isn't swallowing them.
 
-From a terminal, `/Applications/Merlyn.app/Contents/MacOS/Merlyn --notify-test`
+From a terminal, `/Applications/Merly.app/Contents/MacOS/Merly --notify-test`
 posts one alert and logs the authorization callback and the permission state.
 
 **`requestAuthorization` fails with "Notifications are not allowed for this
 application"** (`UNErrorDomain Code=1`)
 It means exactly what it says: **the permission has not been granted**. Grant it —
-allow notifications for Merlyn — and the same binary reads `granted` at once.
+allow notifications for Merly — and the same binary reads `granted` at once.
 
 Do **not** go hunting for a technical cause. Every one of these was measured and
 ruled out over a long session: the code signature (ad-hoc, self-signed, and
@@ -211,26 +211,26 @@ what made this look unfixable. Full write-up: `docs/specs/distribution.md`
 § Notifications.
 
 **Kimi CLI got logged out**
-Kimi's refresh tokens rotate, and only Merlyn's own refresh path persists the
+Kimi's refresh tokens rotate, and only Merly's own refresh path persists the
 rotated ones correctly. Never hand-edit
 `~/.kimi-code/credentials/kimi-code.json` — re-run `kimi login`.
 
 ## Uninstall
 
 ```sh
-osascript -e 'quit app "Merlyn"' 2>/dev/null || true
-rm -rf /Applications/Merlyn.app
-rm -rf ~/Library/Application\ Support/Merlyn   # config + parse cache
+osascript -e 'quit app "Merly"' 2>/dev/null || true
+rm -rf /Applications/Merly.app
+rm -rf ~/Library/Application\ Support/Merly   # config + parse cache
 ```
 
-Merlyn stores nothing else and has no telemetry. Removing it doesn't touch any
+Merly stores nothing else and has no telemetry. Removing it doesn't touch any
 CLI's credentials.
 
 ## Reference
 
 QA flags. These work on any build of the binary — the installed one
-(`/Applications/Merlyn.app/Contents/MacOS/Merlyn`) or a checkout's
-`.build/debug/Merlyn` after `swift build`:
+(`/Applications/Merly.app/Contents/MacOS/Merly`) or a checkout's
+`.build/debug/Merly` after `swift build`:
 
 | Flag | Effect |
 |---|---|
@@ -245,10 +245,14 @@ QA flags. These work on any build of the binary — the installed one
 
 Paths:
 
-- Config: `~/Library/Application Support/Merlyn/providers.json`
-- Parse cache: `~/Library/Application Support/Merlyn/usage-cache.json` (safe to delete)
-- Build output: `build/Merlyn.app` in the checkout
-- Bundle id: `sh.micky.merlyn` — keep it stable; the Keychain grant is tied to it
+- Config: `~/Library/Application Support/Merly/providers.json` (moved from
+  `Merlyn/` on first launch after the rename — if someone reports "all my
+  providers vanished", check whether a stray `Merly/` folder pre-empted the move)
+- Parse cache: `~/Library/Application Support/Merly/usage-cache.json` (safe to delete)
+- Build output: `build/Merly.app` in the checkout
+- Bundle id: `sh.micky.merly` — keep it stable; the Keychain grant is tied to it.
+  It changed from `sh.micky.merlyn` in the rename, so anyone upgrading across it
+  must re-allow notifications and re-approve the Keychain prompt once.
 
 Deeper detail: [docs/specs/distribution.md](../../docs/specs/distribution.md) for
 signing, [docs/provider-integration.md](../../docs/provider-integration.md) for

@@ -17,7 +17,7 @@ struct ProviderDescriptor {
     let defaultDir: String
     /// The CLI subcommand that starts this kind's own sign-in flow.
     ///
-    /// Merlyn never mints or refreshes a token itself — see the never-refresh
+    /// Merly never mints or refreshes a token itself — see the never-refresh
     /// rule in `docs/provider-integration.md`. The sign-in button runs the
     /// CLI's login in a terminal and lets it own the credentials, exactly as
     /// if the user had opened the agent and typed this.

@@ -518,7 +518,7 @@ struct HandleButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .pointerCursor()
-        .help("Hide Merlyn — the menu bar icon brings it back")
+        .help("Hide Merly — the menu bar icon brings it back")
     }
 }
 

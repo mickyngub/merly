@@ -1,17 +1,41 @@
-// Persistence.swift — where Merlyn's state lives on disk (Application
-// Support/Merlyn) and the stores that read/write it. All writes are atomic so
+// Persistence.swift — where Merly's state lives on disk (Application
+// Support/Merly) and the stores that read/write it. All writes are atomic so
 // a crash mid-write can never leave a truncated file, and every failure is
 // logged: a silently-lost user edit is worse than a noisy one.
 
 import Foundation
 
 enum AppPaths {
-    static var supportDir: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("Merlyn", isDirectory: true)
+    static var appSupportBase: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
+    static var supportDir: URL { appSupportBase.appendingPathComponent("Merly", isDirectory: true) }
     static var configFile: URL { supportDir.appendingPathComponent("providers.json") }
     static var cacheFile: URL { supportDir.appendingPathComponent("usage-cache.json") }
+
+    /// The app was called Merlyn until 2026-08-16, and its state lived in
+    /// `Application Support/Merlyn`. Without this move the rename would orphan
+    /// the user's `providers.json` and look exactly like a fresh install —
+    /// re-detecting CLIs and throwing away every hand-edit.
+    ///
+    /// Only ever moves when the new folder does *not* exist, so it can never
+    /// clobber live state and is a no-op on every run after the first. A failure
+    /// is non-fatal: the worst case is the first-run default, which is also what
+    /// happens today if the old folder is missing.
+    ///
+    /// `base` is parameterized for tests only; the app always uses the default.
+    static func migrateLegacySupportDir(in base: URL = appSupportBase) {
+        let fm = FileManager.default
+        let legacy = base.appendingPathComponent("Merlyn", isDirectory: true)
+        let current = base.appendingPathComponent("Merly", isDirectory: true)
+        guard fm.fileExists(atPath: legacy.path), !fm.fileExists(atPath: current.path) else { return }
+        do {
+            try fm.moveItem(at: legacy, to: current)
+            NSLog("Merly: migrated Application Support/Merlyn → Merly")
+        } catch {
+            NSLog("Merly: could not migrate the old Merlyn folder (\(error.localizedDescription)) — starting fresh")
+        }
+    }
 }
 
 /// Writes `data` to `url` atomically, creating its folder on demand.
@@ -25,7 +49,7 @@ func persist(_ data: Data, to url: URL, what: String) -> Bool {
         try data.write(to: url, options: .atomic)
         return true
     } catch {
-        NSLog("Merlyn: failed to save \(what): \(error.localizedDescription)")
+        NSLog("Merly: failed to save \(what): \(error.localizedDescription)")
         return false
     }
 }
@@ -50,7 +74,7 @@ enum ConfigStore {
             // overwrite it with defaults: move it aside so the user's providers,
             // mascot slots, and limit overrides survive to be fixed, and run on
             // the default config in the meantime.
-            NSLog("Merlyn: providers.json is unreadable (\(error.localizedDescription))")
+            NSLog("Merly: providers.json is unreadable (\(error.localizedDescription))")
             quarantine(url)
             return AppConfig.firstRun()
         }
@@ -66,9 +90,9 @@ enum ConfigStore {
         let target = url.appendingPathExtension("broken-\(stamp)")
         do {
             try FileManager.default.moveItem(at: url, to: target)
-            NSLog("Merlyn: moved the broken config to \(target.lastPathComponent) — fix and rename it back to recover")
+            NSLog("Merly: moved the broken config to \(target.lastPathComponent) — fix and rename it back to recover")
         } catch {
-            NSLog("Merlyn: could not quarantine the broken config: \(error.localizedDescription)")
+            NSLog("Merly: could not quarantine the broken config: \(error.localizedDescription)")
         }
     }
 
@@ -110,7 +134,7 @@ enum ConfigStore {
             let data = try encoder.encode(config)
             return persist(data, to: url, what: "providers.json")
         } catch {
-            NSLog("Merlyn: failed to encode providers.json: \(error.localizedDescription)")
+            NSLog("Merly: failed to encode providers.json: \(error.localizedDescription)")
             return false
         }
     }
@@ -131,7 +155,7 @@ enum LastGoodStore {
             let data = try JSONEncoder().encode(dict)
             persist(data, to: file, what: "last-good.json")
         } catch {
-            NSLog("Merlyn: failed to encode last-good.json: \(error.localizedDescription)")
+            NSLog("Merly: failed to encode last-good.json: \(error.localizedDescription)")
         }
     }
 }

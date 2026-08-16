@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Merlyn — Sprite Sheet Spec: Sleeping & Excited</title>
+  <title>Merly — Sprite Sheet Spec: Sleeping & Excited</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 text-slate-900">
   <main class="max-w-3xl mx-auto p-8 space-y-10">
 
     <header>
-      <p class="text-xs font-mono text-slate-400 uppercase tracking-widest mb-1">Merlyn · Mascot Art</p>
+      <p class="text-xs font-mono text-slate-400 uppercase tracking-widest mb-1">Merly · Mascot Art</p>
       <h1 class="text-2xl font-bold">Sprite Sheet Spec</h1>
       <p class="text-slate-500 mt-1">Adding <span class="font-semibold text-blue-600">sleeping</span> and <span class="font-semibold text-orange-500">excited</span> rows to all three mascot sheets</p>
     </header>
@@ -252,16 +252,16 @@
       <div class="space-y-2 text-sm text-slate-600">
         <p><strong>Format:</strong> PNG with transparency (RGBA). No white background.</p>
         <p><strong>Size:</strong> 512 × 1024 px (same width, 512px taller — 8 rows × 128px).</p>
-        <p><strong>Naming:</strong> Replace the existing files in <code class="bg-slate-100 px-1 rounded">Sources/Merlyn/Resources/</code> — same filenames, new content.</p>
+        <p><strong>Naming:</strong> Replace the existing files in <code class="bg-slate-100 px-1 rounded">Sources/Merly/Resources/</code> — same filenames, new content.</p>
         <p><strong>Pixel art scale:</strong> Each art pixel = 8×8 canvas pixels (128px frame ÷ 16 art pixels). Keep pixel edges crisp — no anti-aliasing on the pixel grid itself, only on the frame boundary if needed.</p>
         <p><strong>No code change required</strong> — <code class="bg-slate-100 px-1 rounded">SpriteSheet.swift</code> will be updated to auto-detect row count from the image height, so dropping in a 512×768 sheet is enough.</p>
       </div>
 
       <div class="bg-slate-900 text-slate-100 rounded-lg p-4 font-mono text-xs space-y-1">
         <p class="text-slate-400"># Files to replace</p>
-        <p>Sources/Merlyn/Resources/clawd-sprite.png  <span class="text-green-400"># 512×1024</span></p>
-        <p>Sources/Merlyn/Resources/codex-sprite.png  <span class="text-green-400"># 512×1024</span></p>
-        <p>Sources/Merlyn/Resources/kimi-sprite.png   <span class="text-green-400"># 512×1024</span></p>
+        <p>Sources/Merly/Resources/clawd-sprite.png  <span class="text-green-400"># 512×1024</span></p>
+        <p>Sources/Merly/Resources/codex-sprite.png  <span class="text-green-400"># 512×1024</span></p>
+        <p>Sources/Merly/Resources/kimi-sprite.png   <span class="text-green-400"># 512×1024</span></p>
       </div>
     </section>
 

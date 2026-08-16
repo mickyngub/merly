@@ -1,5 +1,5 @@
-// main.swift — Merlyn entry point. Menu-bar-only app (no Dock icon);
-// `merlyn --print` runs the readers once and prints a plain-text snapshot,
+// main.swift — Merly entry point. Menu-bar-only app (no Dock icon);
+// `merly --print` runs the readers once and prints a plain-text snapshot,
 // which is handy for verifying data parsing without launching the UI.
 
 import AppKit
@@ -71,18 +71,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// flight is indistinguishable from one that quietly succeeded. This reports
     /// the outcome whenever it lands.
     private func runNotificationSelfTest() {
-        NSLog("Merlyn notify-test: supported = \(MacNotifications.isSupported)")
+        NSLog("Merly notify-test: supported = \(MacNotifications.isSupported)")
         MacNotifications.requestAuthorization { granted, error in
-            NSLog("Merlyn notify-test: requestAuthorization → granted=\(granted) error=\(error.map { "\($0)" } ?? "none")")
+            NSLog("Merly notify-test: requestAuthorization → granted=\(granted) error=\(error.map { "\($0)" } ?? "none")")
             Task { @MainActor in
                 MacNotifications.permission { state in
-                    NSLog("Merlyn notify-test: permission = \(state)")
+                    NSLog("Merly notify-test: permission = \(state)")
                     MacNotifications.postTest()
                     // Re-read after posting: the first post is what makes macOS
                     // register the app, so the state can change underneath us.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                         MacNotifications.permission { after in
-                            NSLog("Merlyn notify-test: permission after posting = \(after)")
+                            NSLog("Merly notify-test: permission after posting = \(after)")
                         }
                     }
                 }
@@ -90,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The first launch of the bundled app registers the login item so Merlyn
+    /// The first launch of the bundled app registers the login item so Merly
     /// opens at sign-in without the user hunting for the toggle. Guarded by a
     /// one-shot flag: if the user later turns it off in Settings, we never
     /// re-force it. No-ops for the unbundled dev binary (`isSupported == false`),
@@ -112,7 +112,7 @@ func printSnapshots() {
         cooldownUntil: [:]
     )
     let now = Date()
-    print("Merlyn — \(app.providers.count) providers\n")
+    print("Merly — \(app.providers.count) providers\n")
     for provider in app.providers {
         let snap = reader(for: provider.kind).read(config: provider, app: app, ctx: &ctx, now: now)
         let reset = snap.sessionResetAt.map {
@@ -153,6 +153,9 @@ func printSnapshots() {
     ctx.fileCache.save()
     LastGoodStore.save(ctx.lastGood)
 }
+
+// Before anything reads state: both `--print` and the UI go through AppPaths.
+AppPaths.migrateLegacySupportDir()
 
 if CommandLine.arguments.contains("--print") {
     printSnapshots()

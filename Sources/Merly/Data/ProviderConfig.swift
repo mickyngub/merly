@@ -3,7 +3,7 @@
 
 import Foundation
 
-/// The app's own mascot, shown beside the panel's "Merlyn" title. Independent of
+/// The app's own mascot, shown beside the panel's "Merly" title. Independent of
 /// any provider; its look is user-editable while its mood tracks the busiest
 /// provider's pressure. (The menu bar always wears the *reported provider's*
 /// critter instead, so a reading always has a visible subject.)
@@ -16,7 +16,7 @@ struct DefaultMascot: Codable, Equatable {
     /// Bundled sprite-sheet basename; "" renders the drawn critter instead.
     var sprite: String
 
-    static let standard = DefaultMascot(style: .cat, sprite: "merlyn-sprite")
+    static let standard = DefaultMascot(style: .cat, sprite: "merly-sprite")
 
     /// Sprite sheet to render, or nil when drawing the critter.
     var resolvedSprite: String? { sprite.isEmpty ? nil : sprite }

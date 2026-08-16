@@ -1,5 +1,5 @@
 import XCTest
-@testable import Merlyn
+@testable import Merly
 
 final class TokenWindowEstimatorTests: XCTestCase {
     /// An hour epoch aligned so the whole test day sits inside one 5h block.

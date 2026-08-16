@@ -2,7 +2,7 @@
 // individual frames. Columns are the 4 idle-cycle frames; rows are moods in
 // `Mood.spriteRow` order (up to 8 — the row count is derived from the image
 // height, so taller sheets need no call-site changes). Sheets are processed
-// transparent PNGs in Sources/Merlyn/Resources (see the scripts that build
+// transparent PNGs in Sources/Merly/Resources (see the scripts that build
 // them from the design grids).
 
 import CoreGraphics

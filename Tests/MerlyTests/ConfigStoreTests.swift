@@ -1,5 +1,5 @@
 import XCTest
-@testable import Merlyn
+@testable import Merly
 
 final class ConfigStoreTests: XCTestCase {
     private var dir: URL!
@@ -7,7 +7,7 @@ final class ConfigStoreTests: XCTestCase {
 
     override func setUpWithError() throws {
         dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("merlyn-config-tests-\(UUID().uuidString)")
+            .appendingPathComponent("merly-config-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         configURL = dir.appendingPathComponent("providers.json")
     }

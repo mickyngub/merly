@@ -1,5 +1,5 @@
 import XCTest
-@testable import Merlyn
+@testable import Merly
 
 private func makeConfig(kind: ProviderKind = .claude) -> ProviderConfig {
     ProviderConfig(id: "test", name: "Test", account: "A", kind: kind, dir: "~/.test")

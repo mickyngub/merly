@@ -21,10 +21,10 @@ enum Fate {
     /// The most-separated rotation increment — successive slots are maximally apart.
     static let goldenAngle = 137.50776405003785
 
-    /// 1-in-N one-shot shiny odds. `MERLYN_SHINY_RARITY` overrides it for tuning or
+    /// 1-in-N one-shot shiny odds. `MERLY_SHINY_RARITY` overrides it for tuning or
     /// testing (set it to 1 to make every mascot shiny).
     static var rarity: UInt64 {
-        if let raw = ProcessInfo.processInfo.environment["MERLYN_SHINY_RARITY"],
+        if let raw = ProcessInfo.processInfo.environment["MERLY_SHINY_RARITY"],
            let n = UInt64(raw), n >= 1 { return n }
         return 128
     }

@@ -4,7 +4,7 @@ dist/
 .DS_Store
 *.xcuserstate
 sprite-work/
-scripts/Merlyn.iconset/
+scripts/Merly.iconset/
 .claude/
 .uv-cache/
 # notarization credentials — never commit

@@ -1,6 +1,6 @@
 # Distribution & signing
 
-Merlyn is distributed as **source that each user builds themselves**. There is no
+Merly is distributed as **source that each user builds themselves**. There is no
 prebuilt download, no DMG on the Releases page, and no notarized artifact. This
 document covers how the app bundle is assembled, what signing actually happens,
 and what it would take to change the channel.
@@ -15,32 +15,32 @@ notarization.
 Without it, any DMG lands with `com.apple.quarantine` set, and every user has to
 clear Gatekeeper by hand — since macOS 15 the Control-click → Open shortcut is
 gone, so that means a trip to **System Settings → Privacy & Security → Open
-Anyway**, or `xattr -dr com.apple.quarantine`. Merlyn reads credential tokens.
+Anyway**, or `xattr -dr com.apple.quarantine`. Merly reads credential tokens.
 Training its users to click past *"macOS cannot verify this app is free of
 malware"* works directly against the reason this project is open source at all.
 
 A locally compiled app is **never quarantined**, so building from source has zero
 Gatekeeper friction — better than an unsigned download, and free.
 
-> **Why not the Mac App Store?** Merlyn reads *other* apps' Keychain items and
+> **Why not the Mac App Store?** Merly reads *other* apps' Keychain items and
 > config files under `$HOME` (`~/.codex`, `~/.claude*`, `~/.kimi-code`). The App
 > Store mandates the App Sandbox, which forbids exactly that. See
-> [`scripts/Merlyn.entitlements`](../../scripts/Merlyn.entitlements).
+> [`scripts/Merly.entitlements`](../../scripts/Merly.entitlements).
 
 ## Building the app
 
 ```sh
-scripts/bundle.sh          # → build/Merlyn.app
+scripts/bundle.sh          # → build/Merly.app
 ```
 
-Requires macOS 14+ and a Swift 5.9+ toolchain; nothing else. `scripts/Merlyn.icns`
+Requires macOS 14+ and a Swift 5.9+ toolchain; nothing else. `scripts/Merly.icns`
 is committed, so `scripts/make-icon.py` (and therefore `uv`) only runs if you
 delete it.
 
 What the script does:
 
-1. `swift build -c release`, then assembles `build/Merlyn.app` with `Info.plist`
-   (`LSUIElement`, `LSMinimumSystemVersion 14.0`, bundle id `sh.micky.merlyn`).
+1. `swift build -c release`, then assembles `build/Merly.app` with `Info.plist`
+   (`LSUIElement`, `LSMinimumSystemVersion 14.0`, bundle id `sh.micky.merly`).
 2. **Repacks the SwiftPM resource bundle.** SwiftPM emits a *flat* bundle
    (`Resources/`, no `Info.plist`), which `codesign` rejects as "bundle format
    unrecognized". The script rebuilds it in standard `Contents/` layout;
@@ -60,7 +60,7 @@ Ad-hoc signing produces a designated requirement of `cdhash H"<hash of this exac
 build>"`, verifiable with:
 
 ```sh
-codesign -d -r- build/Merlyn.app
+codesign -d -r- build/Merly.app
 ```
 
 **Keychain "Always Allow" grants** are keyed to that requirement, so **every rebuild
@@ -76,7 +76,7 @@ means ad-hoc, not unsigned.
 ### Don't "fix" it with a self-signed identity
 
 A self-signed code-signing certificate does give a stable designated requirement
-(`identifier "sh.micky.merlyn" and certificate leaf = H"…"`) and does stop the
+(`identifier "sh.micky.merly" and certificate leaf = H"…"`) and does stop the
 Claude re-prompt. **It was tried and reverted**, because the cure is worse:
 
 - Signing with a real key means `codesign` has to *use a private key from your
@@ -108,7 +108,7 @@ you** — hence the Settings › Alerts row and `--notify-test`.
 
 **It means what it says: the user has not granted permission.** Nothing in the
 build fixes it. What actually resolved it was the user allowing notifications for
-Merlyn, after which the same binary read `granted` immediately.
+Merly, after which the same binary read `granted` immediately.
 
 Things that look like the cause and are not — each measured, so don't re-run them:
 
@@ -116,7 +116,7 @@ Things that look like the cause and are not — each measured, so don't re-run t
 |---|---|
 | ad-hoc vs. stable self-signed vs. trusted self-signed | denied in all three |
 | dropping the entitlements blob | denied |
-| unregistering duplicate `build/Merlyn.app` copies from LaunchServices | denied |
+| unregistering duplicate `build/Merly.app` copies from LaunchServices | denied |
 | deleting the app's row from `usernoted/db2/db` + restarting the daemons | denied (and see the warning below) |
 | `tccutil reset All <id>` | denied |
 | MDM configuration profiles | none installed |
@@ -126,9 +126,28 @@ Things that look like the cause and are not — each measured, so don't re-run t
 The permission belongs to the bundle id. A fresh id starts unauthorized, so a
 rename **throws the grant away** and lands you back on `Code=1` — with no prompt,
 because on this macOS the prompt does not reliably reappear for an id it has
-already refused. That is exactly what happened here: the id was renamed mid-debug,
-the user then granted permission to *Merlyn*, and the running app stayed denied
-until the id was put back to `sh.micky.merlyn`. Keep it stable.
+already refused. That is exactly what happened during that debugging session: the
+id was renamed mid-debug, the user then granted permission to the *new* name, and
+the running app stayed denied until the id was put back.
+
+### The one deliberate id change: `sh.micky.merlyn` → `sh.micky.merly`
+
+On 2026-08-16 the app was renamed Merlyn → Merly, and the bundle id was changed
+with it, on purpose and with the cost above understood. The id is reverse-DNS of
+the author's own domain (`micky.sh` reversed, then the app name), so leaving it as
+`…merlyn` would have been permanently misleading.
+
+macOS treats the new id as a different app, so a one-time re-grant is required:
+
+1. Rebuild and reinstall (`scripts/install.sh`), then launch.
+2. Notifications: confirm with `Merly.app/Contents/MacOS/Merly --notify-test`, or
+   the Settings › Alerts row. If it reports denied, allow *Merly* in
+   System Settings › Notifications.
+3. Keychain: the first Claude read re-prompts for `Claude Code-credentials`.
+   Approve it once (see the ad-hoc signing note above for why it recurs per build).
+
+`sh.micky.merlyn` is now dead — its old grants are unreachable and were abandoned
+knowingly. **The id is stable again from here.**
 
 ### Don't go digging in the notification database
 
@@ -140,18 +159,18 @@ not the permission store. Two traps:
 - Deleting rows and restarting `usernoted` does not clear a denial, and appeared to
   leave new-app registration wedged afterwards. There is nothing to win here.
 
-`com.apple.ncprefs.plist` holds no entry for Merlyn even when granted, so it is not
+`com.apple.ncprefs.plist` holds no entry for Merly even when granted, so it is not
 the store on macOS 26 either — don't read state out of it.
 
 ### How to check
 
 ```sh
-/Applications/Merlyn.app/Contents/MacOS/Merlyn --notify-test
+/Applications/Merly.app/Contents/MacOS/Merly --notify-test
 ```
 
 Posts one alert and logs the authorization callback plus the permission state
 either side of it. Settings › Alerts shows the same verdict in the UI. If it says
-denied, the fix is in System Settings › Notifications › Merlyn — not in this repo.
+denied, the fix is in System Settings › Notifications › Merly — not in this repo.
 
 ## CI
 
@@ -171,12 +190,12 @@ run on every push proves nothing their own `swift build` doesn't.
 
 | Var | Default | Meaning |
 |---|---|---|
-| `MERLYN_VERSION` | `1.0` | Marketing version → `CFBundleShortVersionString` |
-| `MERLYN_BUILD` | `1` | Build number → `CFBundleVersion` |
+| `MERLY_VERSION` | `1.0` | Marketing version → `CFBundleShortVersionString` |
+| `MERLY_BUILD` | `1` | Build number → `CFBundleVersion` |
 | `SIGN_IDENTITY` | auto-detected | Force a specific codesign identity |
-| `MERLYN_ADHOC` | `0` | `1` = force ad-hoc signing even if a Developer ID exists |
+| `MERLY_ADHOC` | `0` | `1` = force ad-hoc signing even if a Developer ID exists |
 
-`scripts/install.sh` adds `NO_INSTALL`, `NO_LAUNCH` and `MERLYN_REPO`.
+`scripts/install.sh` adds `NO_INSTALL`, `NO_LAUNCH` and `MERLY_REPO`.
 
 ## There is no packaging script
 
@@ -194,7 +213,7 @@ git show <commit>^:scripts/dmg.sh > scripts/dmg.sh           # restore it
 Going notarized needs, in order: enroll in the Developer Program and note the Team
 ID; create a *Developer ID Application* certificate (Xcode → Settings → Accounts →
 Manage Certificates); create an app-specific password at appleid.apple.com; store
-notary credentials once with `xcrun notarytool store-credentials merlyn-notary`; and
+notary credentials once with `xcrun notarytool store-credentials merly-notary`; and
 restore a packaging script (see above). `bundle.sh` itself needs no changes — it
 already picks a Developer ID up automatically and switches on Hardened Runtime,
 which notarization requires. The entitlements dict is intentionally empty; no
@@ -203,9 +222,11 @@ than using in-process APIs.
 
 ## Footguns
 
-- **Keep the bundle id `sh.micky.merlyn` stable.** The Keychain grant for Claude
-  credentials is tied to the app's signature and identity.
+- **Keep the bundle id `sh.micky.merly` stable.** The Keychain grant for Claude
+  credentials is tied to the app's signature and identity, and the notification
+  grant is tied to the id alone. It was changed exactly once, for the Merlyn →
+  Merly rename; see § The one deliberate id change.
 - Should notarization ever come back: it needs network, Hardened Runtime, and **no**
   `get-task-allow` entitlement (release signing omits it automatically). If
   `notarytool submit` reports `Invalid`, fetch the log with `xcrun notarytool log
-  <submission-id> --keychain-profile merlyn-notary`.
+  <submission-id> --keychain-profile merly-notary`.

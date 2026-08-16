@@ -2,15 +2,15 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow"]
 # ///
-"""Build Merlyn.icns from the Merlyn wizard mascot sprite.
+"""Build Merly.icns from the Merly wizard mascot sprite.
 
-`merlyn-mascot.png` is the crisp, pre-pixelated wizard-Clawd sprite (our canonical
+`merly-mascot.png` is the crisp, pre-pixelated wizard-Clawd sprite (our canonical
 Clawd frame with a wizard hat, big handlebar mustache, and a gold-orb staff),
 stored transparent. We drop it, scaled to fill, on a full-bleed dark charcoal
-squircle that matches the Merlyn panel, then emit the full .iconset and run
+squircle that matches the Merly panel, then emit the full .iconset and run
 iconutil.
 
-To restyle the mascot: replace merlyn-mascot.png (a transparent pixel sprite) and
+To restyle the mascot: replace merly-mascot.png (a transparent pixel sprite) and
 re-run. The raw source art + de-smudge pipeline live in sprite-work/perch/
 (gitignored dev scratch); this script only needs the baked sprite.
 """
@@ -20,12 +20,12 @@ import subprocess
 from PIL import Image, ImageDraw
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SPRITE = ROOT / "scripts/merlyn-mascot.png"
-ICONSET = ROOT / "scripts/Merlyn.iconset"
-ICNS = ROOT / "scripts/Merlyn.icns"
+SPRITE = ROOT / "scripts/merly-mascot.png"
+ICONSET = ROOT / "scripts/Merly.iconset"
+ICNS = ROOT / "scripts/Merly.icns"
 
 SIZE = 1024
-NAVY = (31, 35, 41, 255)     # Merlyn panel charcoal
+NAVY = (31, 35, 41, 255)     # Merly panel charcoal
 RADIUS = 0.2237              # squircle corner radius (macOS icon grid)
 FILL = 0.82                  # sprite's longest side as a fraction of the canvas
 

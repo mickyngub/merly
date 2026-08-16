@@ -18,12 +18,12 @@ What you expected to happen instead.
 
 **Environment**
 - macOS version:
-- Merlyn commit (`git -C <your checkout> rev-parse --short HEAD`):
+- Merly commit (`git -C <your checkout> rev-parse --short HEAD`):
 - Affected provider(s): Claude / Codex / Kimi / other
 - Was the card showing real data or an estimate (a `≈` on the ring)?
 
 **Logs / output**
-If helpful, attach the output of `.build/debug/Merlyn --print`.
+If helpful, attach the output of `.build/debug/Merly --print`.
 
 > ⚠️ **Never paste access tokens, refresh tokens, or the contents of your
 > credential files.** Redact anything token-shaped before posting.

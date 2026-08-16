@@ -1,7 +1,7 @@
 // LoginLauncher.swift — runs a provider CLI's own sign-in flow in a terminal, so
 // an expired login can be fixed from the panel instead of hunting down the agent.
 //
-// Merlyn deliberately does not authenticate on the provider's behalf: it never
+// Merly deliberately does not authenticate on the provider's behalf: it never
 // mints or refreshes a token (see docs/provider-integration.md). This only shells
 // out to the CLI's documented login command — `claude auth login`, `codex login`,
 // `kimi login` — which then owns the credentials as usual.
@@ -31,7 +31,7 @@ enum LoginLauncher {
         let fm = FileManager.default
         let tmp = fm.temporaryDirectory
         guard let names = try? fm.contentsOfDirectory(atPath: tmp.path) else { return }
-        for name in names where name.hasPrefix("merlyn-signin-") && name.hasSuffix(".command") {
+        for name in names where name.hasPrefix("merly-signin-") && name.hasSuffix(".command") {
             try? fm.removeItem(at: tmp.appendingPathComponent(name))
         }
     }
@@ -39,7 +39,7 @@ enum LoginLauncher {
     private static func writeScript(for config: ProviderConfig) -> URL? {
         let slug = config.id.map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("merlyn-signin-\(slug).command")
+            .appendingPathComponent("merly-signin-\(slug).command")
         do {
             try script(for: config).write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755],
@@ -60,7 +60,7 @@ enum LoginLauncher {
         return """
         #!/bin/zsh -l
         export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
-        printf '\\033]0;Merlyn — sign in\\007'
+        printf '\\033]0;Merly — sign in\\007'
         echo "Signing in to \(label.shellEscapedForDoubleQuotes)"
         echo "> \(config.loginShellCommand.shellEscapedForDoubleQuotes)"
         echo
@@ -69,7 +69,7 @@ enum LoginLauncher {
         rc=$?
         echo
         if [ $rc -eq 0 ]; then
-          echo "Signed in. Merlyn picks it up on its next refresh."
+          echo "Signed in. Merly picks it up on its next refresh."
         else
           echo "Sign-in exited with status $rc."
         fi

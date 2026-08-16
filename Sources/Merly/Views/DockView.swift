@@ -175,7 +175,7 @@ struct DockView: View {
 
     /// The app's own mascot beside the title — its home, now that the menu bar
     /// wears the reported provider's critter instead. Its mood tracks the busiest
-    /// provider's pressure, but never `.dead`: this one is Merlyn itself, and one
+    /// provider's pressure, but never `.dead`: this one is Merly itself, and one
     /// lapsed provider mustn't make the app look broken. Tapping it opens the
     /// editor, which is otherwise only reachable from the right-click menu.
     private var titleMascot: some View {
@@ -203,8 +203,8 @@ struct DockView: View {
         }
         .buttonStyle(.plain)
         .pointerCursor()
-        .accessibilityLabel("Edit the Merlyn mascot")
-        .help("Merlyn — click to edit the mascot")
+        .accessibilityLabel("Edit the Merly mascot")
+        .help("Merly — click to edit the mascot")
     }
 
     private var header: some View {
@@ -213,7 +213,7 @@ struct DockView: View {
                 titleMascot
             }
             VStack(alignment: .leading, spacing: 1) {
-                Text("Merlyn")
+                Text("Merly")
                     .font(.system(size: 17, weight: .bold))
                     .tracking(-0.3)
                     .foregroundStyle(theme.text)
@@ -420,7 +420,7 @@ struct RailView: View {
             ? AnyLayout(VStackLayout(spacing: Self.spacing))
             : AnyLayout(HStackLayout(spacing: Self.spacing))
         return layout {
-            RailIconButton(systemName: "xmark", help: "Close Merlyn — the menu bar icon brings it back", action: onClose)
+            RailIconButton(systemName: "xmark", help: "Close Merly — the menu bar icon brings it back", action: onClose)
             Image(systemName: expandGlyph)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.text2)
@@ -439,7 +439,7 @@ struct RailView: View {
         // presents as one button.
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Open the Merlyn usage panel")
+        .accessibilityLabel("Open the Merly usage panel")
         .accessibilityAction { onExpand() }
         .accessibilityAction(named: "Close") { onClose() }
         .help("Open usage — or drag to another edge")
