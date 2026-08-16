@@ -73,7 +73,9 @@ private func apiFirst(
     // "login expired (…)" reason onto it.
     if !snapshot.isUnavailable {
         let reason = cooling ? "API cooling down" : fetchError.map { "\($0)" } ?? "API unavailable"
-        snapshot.note = [snapshot.note, reason].compactMap(\.self).joined(separator: " · ")
+        // `compactMap { $0 }`, not `compactMap(\.self)`: the key-path form fails to
+        // type-check on the Swift shipped with the macos-14 CI runner.
+        snapshot.note = [snapshot.note, reason].compactMap { $0 }.joined(separator: " · ")
     }
     return snapshot
 }
