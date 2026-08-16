@@ -331,14 +331,33 @@ struct AddProviderCard: View {
 
 struct RailView: View {
     @ObservedObject var engine: UsageEngine
+    /// Which screen edge the rail is clinging to — it decides the stacking axis,
+    /// which way the expand chevron points, and which corners are rounded.
+    let edge: RailPlacement.Edge
     let onExpand: () -> Void
+    /// The X: dismisses the rail outright, the same "get this off my screen" the
+    /// expanded panel's chevron tab means.
+    let onClose: () -> Void
+    /// Screen-point mouse position, reported live while the rail is dragged. The
+    /// window moves out from under the cursor as it goes, so a translation
+    /// measured in view space would compound with its own effect — the controller
+    /// works in absolute coordinates instead.
+    var onDragChanged: (CGPoint) -> Void = { _ in }
+    var onDragEnded: (CGPoint) -> Void = { _ in }
 
     @State private var hovering = false
+    /// Set once a press has travelled far enough to be a drag rather than a click,
+    /// so one gesture can serve both without SwiftUI having to arbitrate between a
+    /// tap and a drag recogniser (which it resolves inconsistently once a Button
+    /// is nested inside the same view).
+    @State private var dragging = false
     @Environment(\.theme) private var theme
 
     static let mascotPx: CGFloat = 28
     static let spacing: CGFloat = 13
-    static let chevronHeight: CGFloat = 16
+    /// The chevron and the close button are square, so the same number is their
+    /// extent whichever way the rail runs.
+    static let controlSize: CGFloat = 16
     /// One gauge lane under each mascot, the space above the first, and the gap
     /// between lanes — the menu bar item's proportions scaled up to the rail's
     /// larger mascot.
@@ -348,50 +367,103 @@ struct RailView: View {
     /// Lanes reserved per provider: the 5h window and the weekly cap (see
     /// `ProviderSnapshot.iconGauges`).
     static let laneCount = 2
-    /// Padding above the chevron and below the last mascot. Kept >= the panel's
-    /// corner radius so a hover-scaled bottom mascot never clips on the corner.
+    /// Padding before the first control and after the last mascot. Kept >= the
+    /// panel's corner radius so a hover-scaled end mascot never clips on a corner.
     static let vPadding: CGFloat = 16
+    /// Clearance either side of a mascot across the rail's short dimension.
+    static let crossPadding: CGFloat = 9
 
     /// One provider's slot: mascot plus both gauge lanes under it. Both rows are
     /// reserved even for a provider that draws one bar or none, so a single-limit
     /// provider — or one dropping out entirely — doesn't reflow the rail or shift
     /// the mascots' rhythm.
-    static var itemHeight: CGFloat {
+    ///
+    /// Always stacked the same way round, whichever edge the rail is on: the bars
+    /// mean "this critter's levels", and that only reads if they stay under it. So
+    /// this is the item's length in a vertical rail and its breadth in a
+    /// horizontal one.
+    static var itemBlock: CGFloat {
         mascotPx + gaugeGap + CGFloat(laneCount) * gaugeHeight
             + CGFloat(laneCount - 1) * laneGap
     }
 
-    /// Natural height for `count` providers — the rail panel is sized to this so
-    /// it stops at the last mascot instead of filling the screen.
-    static func contentHeight(providerCount count: Int) -> CGFloat {
-        let items = count + 1 // chevron + one mascot per provider
-        let itemsHeight = chevronHeight + CGFloat(count) * itemHeight
+    /// The rail's short dimension — 46pt as a column, wider as a row, because a
+    /// row has to fit the gauge lanes across its thickness rather than along it.
+    static func breadth(vertical: Bool) -> CGFloat {
+        (vertical ? mascotPx : itemBlock) + crossPadding * 2
+    }
+
+    /// Natural length for `count` providers — the rail panel is sized to this so
+    /// it stops at the last mascot instead of running the whole screen edge.
+    static func contentLength(providerCount count: Int, vertical: Bool) -> CGFloat {
+        let items = count + 2 // close + chevron + one mascot per provider
+        let perItem = vertical ? itemBlock : mascotPx
+        let controls = controlSize * 2
         let gaps = CGFloat(max(items - 1, 0)) * spacing
-        return vPadding * 2 + itemsHeight + gaps
+        return vPadding * 2 + controls + CGFloat(count) * perItem + gaps
+    }
+
+    /// Points toward where the panel will expand — always away from the edge the
+    /// rail is pinned to, so the glyph reads as "pull this open".
+    private var expandGlyph: String {
+        switch edge {
+        case .right: return "chevron.left"
+        case .left: return "chevron.right"
+        case .top: return "chevron.down"
+        case .bottom: return "chevron.up"
+        }
     }
 
     var body: some View {
-        VStack(spacing: Self.spacing) {
-            Image(systemName: "chevron.left")
+        let vertical = edge.isVertical
+        let layout = vertical
+            ? AnyLayout(VStackLayout(spacing: Self.spacing))
+            : AnyLayout(HStackLayout(spacing: Self.spacing))
+        return layout {
+            RailIconButton(systemName: "xmark", help: "Close Merlyn — the menu bar icon brings it back", action: onClose)
+            Image(systemName: expandGlyph)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(theme.text2)
-                .frame(height: Self.chevronHeight)
+                .frame(width: Self.controlSize, height: Self.controlSize)
             ForEach(engine.snapshots) { snapshot in
                 item(snapshot)
             }
         }
-        .padding(.vertical, Self.vPadding)
-        .frame(maxWidth: .infinity)
+        .padding(vertical ? .vertical : .horizontal, Self.vPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onExpand)
+        .gesture(moveOrOpen)
         .onHover { hovering = $0 }
         .pointerCursor()
-        // The whole rail is one click target, so it presents as one button.
-        .accessibilityElement(children: .combine)
+        // Outside the close button the whole rail is one click target, so it
+        // presents as one button.
+        .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel("Open the Merlyn usage panel")
         .accessibilityAction { onExpand() }
-        .help("Open usage")
+        .accessibilityAction(named: "Close") { onClose() }
+        .help("Open usage — or drag to another edge")
+    }
+
+    /// One gesture for both "click me open" and "drag me to another edge".
+    ///
+    /// `minimumDistance: 0` so the press is tracked from the first pixel — a drag
+    /// recogniser with a real minimum only starts reporting *after* the pointer has
+    /// already moved, which makes the rail jump that distance the moment it catches
+    /// up. The click/drag decision is made here instead, on distance travelled.
+    private var moveOrOpen: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let travelled = hypot(value.translation.width, value.translation.height)
+                guard dragging || travelled > 5 else { return }
+                dragging = true
+                onDragChanged(NSEvent.mouseLocation)
+            }
+            .onEnded { _ in
+                guard dragging else { return onExpand() }
+                dragging = false
+                onDragEnded(NSEvent.mouseLocation)
+            }
     }
 
     /// One rail entry: the mascot with its gauge lanes tucked underneath, the same
@@ -473,6 +545,33 @@ struct RailView: View {
                     .opacity(fraction > 0 ? 1 : 0)
             }
             .animation(Theme.snappy(0.55), value: fraction)
+    }
+}
+
+/// A control in the rail's header. Sized to `controlSize` like the chevron beside
+/// it, but a real Button: a nested Button wins the press against the rail's own
+/// drag gesture, which is what keeps "close" from being read as "start moving me".
+private struct RailIconButton: View {
+    let systemName: String
+    let help: String
+    let action: () -> Void
+
+    @State private var hovering = false
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 9.5, weight: .bold))
+                .foregroundStyle(hovering ? theme.text : theme.text3)
+                .frame(width: RailView.controlSize, height: RailView.controlSize)
+                .background(hovering ? theme.chip : .clear, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .pointerCursor()
+        .help(help)
     }
 }
 

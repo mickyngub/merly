@@ -15,6 +15,28 @@ struct NotificationSettings: Codable, Equatable {
     var notifyOnReset: Bool = true
 }
 
+/// Where the collapsed rail sits.
+///
+/// The rail is draggable and snaps to whichever screen edge it was dropped
+/// nearest, so this is user state rather than a constant. `offset` is how far
+/// along that edge it landed, as a fraction of the travel available (0 = top or
+/// leading, 1 = bottom or trailing) — a fraction and not points, so the same
+/// placement means the same thing after a resolution change or on a second
+/// display.
+struct RailPlacement: Codable, Equatable {
+    enum Edge: String, Codable, CaseIterable {
+        case left, right, top, bottom
+
+        /// Whether the rail *runs* vertically — true for the screen's side edges,
+        /// where mascots stack in a column; false along the top and bottom, where
+        /// they sit in a row.
+        var isVertical: Bool { self == .left || self == .right }
+    }
+
+    var edge: Edge = .right
+    var offset: Double = 0
+}
+
 struct AppConfig: Codable {
     var sessionHours: Double
     var refreshSeconds: Double
@@ -29,11 +51,21 @@ struct AppConfig: Codable {
     /// original always-busiest behaviour, kept as the default because it's the one
     /// pick that can't go stale.
     var menuBarProviderId: String? = nil
+    /// Where the collapsed rail was last dropped. Optional so configs written
+    /// before the rail was draggable still decode.
+    var rail: RailPlacement? = nil
 
     /// Always-present view of the alert settings, defaulting when absent.
     var notificationSettings: NotificationSettings {
         get { notifications ?? NotificationSettings() }
         set { notifications = newValue }
+    }
+
+    /// Always-present view of the rail's placement, defaulting to the right edge
+    /// under the menu bar — where it lived before it could be moved.
+    var railPlacement: RailPlacement {
+        get { rail ?? RailPlacement() }
+        set { rail = newValue }
     }
 
     /// Always-present view of the menu bar mascot, defaulting when absent.

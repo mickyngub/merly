@@ -22,7 +22,7 @@ final class UsageEngine: ObservableObject {
     /// Whether the queued mid-pass refresh was user-initiated, so a forced click
     /// during an in-flight pass isn't downgraded to a background poll.
     private var pendingForce = false
-    private let workQueue = DispatchQueue(label: "sh.micky.merlyn.engine", qos: .utility)
+    private let workQueue = DispatchQueue(label: "com.mickyngub.merlyn.engine", qos: .utility)
 
     init() {
         appConfig = ConfigStore.load()
@@ -195,6 +195,17 @@ final class UsageEngine: ObservableObject {
     func updateNotificationSettings(_ settings: NotificationSettings) {
         var config = appConfig
         config.notificationSettings = settings
+        ConfigStore.save(config)
+        appConfig = config
+    }
+
+    /// Persist where the rail was dropped. No republish: the panel controller
+    /// owns the rail's geometry and has already moved it — this only makes the
+    /// placement survive a restart.
+    func updateRailPlacement(_ placement: RailPlacement) {
+        guard placement != appConfig.railPlacement else { return }
+        var config = appConfig
+        config.railPlacement = placement
         ConfigStore.save(config)
         appConfig = config
     }
