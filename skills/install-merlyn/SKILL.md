@@ -20,16 +20,8 @@ Repo: <https://github.com/mickyngub/merlyn>
 
 ## Install
 
-Once per machine, before the first build — this is what lets macOS remember the
-notification permission and the Keychain grant across rebuilds (see *First launch*
-for why it matters):
-
-```sh
-scripts/make-signing-cert.sh
-```
-
-Then one command does everything — preflight, build, quit any running copy,
-install, launch:
+One command does everything — preflight, build, quit any running copy, install,
+launch:
 
 ```sh
 scripts/install.sh
@@ -97,33 +89,39 @@ toggles the panel; right-click opens the menu.
 It will ask for **Keychain access** to read the Claude Code credentials — click
 **Always Allow**.
 
-> ### Run the signing-identity script once, before the first build
+> ### That Keychain prompt returns after every rebuild — this is expected
 >
-> ```sh
-> scripts/make-signing-cert.sh
-> ```
->
-> macOS ties two grants to an app's exact code signature. Without a stable
-> identity, an *ad-hoc* signed Merlyn has a designated requirement that is a hash of
-> that one binary:
+> Merlyn is never signed *for* distribution: there is no shipped artifact to sign.
+> Each machine signs its own build, locally, with whatever identity that machine
+> has. Signing still happens on every build because Apple Silicon refuses to
+> execute an entirely unsigned binary — so with no certificate present the build is
+> **ad-hoc** signed, a signature carrying no identity. Its designated requirement is
+> then a hash of that one binary:
 >
 > ```sh
 > codesign -d -r- /Applications/Merlyn.app   # => cdhash H"..."
 > ```
 >
-> Every build produces a different hash, so every build is a new app as far as
-> macOS is concerned, and the **Keychain prompt returns after every rebuild**.
+> Every build produces a different hash, so every build is a new app to the
+> Keychain, and the "Always Allow" grant for the Claude credentials is asked for
+> again. Say this up front so a returning prompt doesn't read as sinister.
 >
-> `make-signing-cert.sh` creates a local self-signed identity once, which
-> `scripts/bundle.sh` and `install.sh` then pick up automatically. It asks for your
-> login password once (to trust the certificate), and the first build after it asks
-> once for Keychain access to the *signing key* — choose **Always Allow**. It does
-> nothing for Gatekeeper (a self-signed leaf isn't a trusted anchor) and only helps
-> the machine holding it. Undo:
+> **Install once and it costs one prompt, so most people should do nothing.**
+> Someone who rebuilds often can trade it for a stable local identity:
+>
+> ```sh
+> scripts/make-signing-cert.sh   # optional, once per machine
+> ```
+>
+> `bundle.sh` and `install.sh` pick it up automatically from then on. It costs one
+> login-password dialog (to trust the certificate) plus one Keychain prompt on the
+> next build — choose **Always Allow** — and the re-prompting stops. It is purely
+> local: it does nothing for Gatekeeper, nothing for anyone else's machine, and it
+> is not a step toward shipping binaries. Undo:
 > `security delete-certificate -c "Merlyn Local Signing"`.
 >
 > It has **no effect on notifications**, which look like they should be governed by
-> the same thing but are keyed to the bundle id instead — see Troubleshooting.
+> the same thing but are not — see Troubleshooting.
 
 ## Update
 

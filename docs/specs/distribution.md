@@ -67,6 +67,13 @@ codesign -d -r- build/Merlyn.app
 **Keychain "Always Allow" grants** are keyed to that requirement, so macOS
 re-prompts for the Claude credentials after every build.
 
+> Nothing here is about *distribution*. The project signs no artifact — each
+> machine signs its own build, and the signature never leaves it. Signing happens
+> regardless because Apple Silicon will not execute an unsigned binary, so "no
+> certificate" means ad-hoc, not unsigned. Everything below is local
+> quality-of-life for whoever rebuilds a lot, and is **optional**: install once and
+> the re-prompt costs one click.
+
 A **self-signed** code-signing identity fixes that. Its requirement is
 `identifier "com.mickyngub.merlyn" and certificate leaf = H"…"`, which survives
 rebuilds:
