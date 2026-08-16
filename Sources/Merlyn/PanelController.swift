@@ -509,6 +509,8 @@ struct HandleButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .pointerCursor()
+        // See IconButton: the tab is chrome, and a ring around it reads as state.
+        .focusEffectDisabled()
         .help("Hide Merlyn — the menu bar icon brings it back")
     }
 }
@@ -537,6 +539,13 @@ struct RailRootView: View {
         .background { ZStack { VisualEffect(); theme.panelTint } }
         .clipShape(shape)
         .overlay(shape.strokeBorder(theme.panelEdge, lineWidth: 0.5))
+        // No focus rings anywhere in the rail. The close button is the first
+        // focusable control in the window, so SwiftUI hands it initial focus and
+        // draws a blue ring around it every single time the rail appears — which
+        // reads as "this is selected" on a strip whose whole job is to be glanced
+        // at. Safe to disable wholesale here: the rail holds no text input, so
+        // there is no keyboard state a ring would be telling you about.
+        .focusEffectDisabled()
         .environment(\.theme, theme)
     }
 
