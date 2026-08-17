@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)](#install)
 [![Build from source](https://img.shields.io/badge/install-build%20from%20source-orange)](#install)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/mickyngub)
 
 A native macOS menu bar app that tracks how much of your AI coding agent quota you've burned — across **Claude** (multiple accounts), **Codex**, **Kimi**, and any future provider you point at a config folder.
 
@@ -103,6 +104,10 @@ Merly is a **read-only** usage viewer with no telemetry. It reads tokens that yo
 ## Contributing
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Support
+
+Merly is free, MIT-licensed, and has no telemetry or paid tier — it's a weekend tool that got out of hand. If it saves you from one more `/usage` check, you can [buy me a coffee](https://www.buymeacoffee.com/mickyngub). Entirely optional; the app never asks.
 
 ## License
 

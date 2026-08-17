@@ -1,0 +1,9 @@
+# Renders the ❤️ Sponsor button on the repo page and the sidebar funding links.
+# Requires Settings › General › Features › Sponsorships to be enabled.
+#
+# The github entry stays inert until the Sponsors listing is published and
+# approved (GitHub reports hasSponsorsListing: false while it's a draft); it
+# starts rendering on its own once that lands, no change needed here.
+
+github: [mickyngub]
+buy_me_a_coffee: mickyngub
