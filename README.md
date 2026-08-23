@@ -1,10 +1,14 @@
 # Merly
 
+<img src="assets/merly-banner.png" alt="Merly, a native macOS menu bar app for AI agent quota, by Pichaya Puttekulangkura" width="880">
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)](#install)
 [![Build from source](https://img.shields.io/badge/install-build%20from%20source-orange)](#install)
 [![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/mickyngub)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/mickyngub)
+
+<a href="https://www.buymeacoffee.com/mickyngub" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="48" width="174"></a>
 
 A native macOS menu bar app that tracks how much of your AI coding agent quota you've burned — across **Claude** (multiple accounts), **Codex**, **Kimi**, and any future provider you point at a config folder.
 
@@ -115,9 +119,7 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code o
 Merly is free, MIT-licensed, and has no telemetry or paid tier — it's a weekend tool that got out of hand. If it saves you from one more `/usage` check, there are two ways to say thanks — both entirely optional; the app never asks.
 
 - **[GitHub Sponsors](https://github.com/sponsors/mickyngub)** — recurring or one-off, billed with your GitHub account.
-- **Buy Me a Coffee** — a one-off tip, no account needed:
-
-<a href="https://www.buymeacoffee.com/mickyngub" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="48" width="174"></a>
+- **[Buy Me a Coffee](https://www.buymeacoffee.com/mickyngub)** — a one-off tip, no account needed.
 
 ## License
 
