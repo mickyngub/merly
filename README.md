@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)](#install)
 [![Build from source](https://img.shields.io/badge/install-build%20from%20source-orange)](#install)
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/mickyngub)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/mickyngub)
 
 A native macOS menu bar app that tracks how much of your AI coding agent quota you've burned — across **Claude** (multiple accounts), **Codex**, **Kimi**, and any future provider you point at a config folder.
@@ -10,6 +11,10 @@ A native macOS menu bar app that tracks how much of your AI coding agent quota y
 Each provider gets a cute 8-bit pixel critter whose **mood tracks your usage**: `CHILL` → `OK` → `BUSY` → `FRIED`. They idle-bob, blink, and hop when you poke them.
 
 > **Unofficial project.** Merly is a third-party tool and is **not affiliated with, endorsed by, or sponsored by** Anthropic, OpenAI, or Moonshot AI. "Claude", "Codex", "Kimi", and related names and mascots are trademarks of their respective owners, used here only to identify the services whose usage Merly displays. Merly only *reads* usage data these tools already store on your Mac — see [Privacy & security](#privacy--security).
+
+## Demo
+
+https://github.com/user-attachments/assets/4faece85-b8f7-4ae7-88ff-edef795120a4
 
 ## What it looks like
 
@@ -107,7 +112,12 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code o
 
 ## Support
 
-Merly is free, MIT-licensed, and has no telemetry or paid tier — it's a weekend tool that got out of hand. If it saves you from one more `/usage` check, you can [buy me a coffee](https://www.buymeacoffee.com/mickyngub). Entirely optional; the app never asks.
+Merly is free, MIT-licensed, and has no telemetry or paid tier — it's a weekend tool that got out of hand. If it saves you from one more `/usage` check, there are two ways to say thanks — both entirely optional; the app never asks.
+
+- **[GitHub Sponsors](https://github.com/sponsors/mickyngub)** — recurring or one-off, billed with your GitHub account.
+- **Buy Me a Coffee** — a one-off tip, no account needed:
+
+<a href="https://www.buymeacoffee.com/mickyngub" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="48" width="174"></a>
 
 ## License
 
