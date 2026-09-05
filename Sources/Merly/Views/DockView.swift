@@ -355,9 +355,13 @@ struct RailView: View {
 
     static let mascotPx: CGFloat = 28
     static let spacing: CGFloat = 13
-    /// The chevron and the close button are square, so the same number is their
-    /// extent whichever way the rail runs.
-    static let controlSize: CGFloat = 16
+    /// The header pill: close and expand, each a square control, packed in one
+    /// capsule so they read as a unit rather than two stray glyphs.
+    static let headerControl: CGFloat = 18
+    static let headerGap: CGFloat = 2
+    static let headerPad: CGFloat = 3
+    /// The pill's extent along the rail — its breadth (24) fits inside a mascot.
+    static var headerLength: CGFloat { headerPad * 2 + headerControl * 2 + headerGap }
     /// One gauge lane under each mascot, the space above the first, and the gap
     /// between lanes — the menu bar item's proportions scaled up to the rail's
     /// larger mascot.
@@ -396,11 +400,10 @@ struct RailView: View {
     /// Natural length for `count` providers — the rail panel is sized to this so
     /// it stops at the last mascot instead of running the whole screen edge.
     static func contentLength(providerCount count: Int, vertical: Bool) -> CGFloat {
-        let items = count + 2 // close + chevron + one mascot per provider
+        let items = count + 1 // header pill + one mascot per provider
         let perItem = vertical ? itemBlock : mascotPx
-        let controls = controlSize * 2
         let gaps = CGFloat(max(items - 1, 0)) * spacing
-        return vPadding * 2 + controls + CGFloat(count) * perItem + gaps
+        return vPadding * 2 + headerLength + CGFloat(count) * perItem + gaps
     }
 
     /// Points toward where the panel will expand — always away from the edge the
@@ -414,17 +417,34 @@ struct RailView: View {
         }
     }
 
+    /// How far the chevron leans in the expand direction while the rail is hovered:
+    /// a 2pt nudge that says "this pulls open" without a tooltip.
+    private var expandNudge: CGSize {
+        switch edge {
+        case .right: return CGSize(width: -2, height: 0)
+        case .left: return CGSize(width: 2, height: 0)
+        case .top: return CGSize(width: 0, height: 2)
+        case .bottom: return CGSize(width: 0, height: -2)
+        }
+    }
+
     var body: some View {
         let vertical = edge.isVertical
         let layout = vertical
             ? AnyLayout(VStackLayout(spacing: Self.spacing))
             : AnyLayout(HStackLayout(spacing: Self.spacing))
         return layout {
-            RailIconButton(systemName: "xmark", help: "Close Merly — the menu bar icon brings it back", action: onClose)
-            Image(systemName: expandGlyph)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(theme.text2)
-                .frame(width: Self.controlSize, height: Self.controlSize)
+            layout {
+                RailIconButton(systemName: "xmark", size: 8.5, idleTint: theme.text3,
+                               help: "Close Merly — the menu bar icon brings it back", action: onClose)
+                RailIconButton(systemName: expandGlyph, size: 10, idleTint: theme.text2,
+                               help: "Open usage", action: onExpand)
+                    .offset(hovering ? expandNudge : .zero)
+                    .animation(Theme.snappy(0.4), value: hovering)
+            }
+            .padding(Self.headerPad)
+            .background(theme.chip, in: Capsule())
+            .overlay(Capsule().strokeBorder(theme.hairline, lineWidth: 0.5))
             ForEach(engine.snapshots) { snapshot in
                 item(snapshot)
             }
@@ -548,11 +568,13 @@ struct RailView: View {
     }
 }
 
-/// A control in the rail's header. Sized to `controlSize` like the chevron beside
-/// it, but a real Button: a nested Button wins the press against the rail's own
-/// drag gesture, which is what keeps "close" from being read as "start moving me".
+/// A control in the rail's header pill. A real Button: a nested Button wins the
+/// press against the rail's own drag gesture, which is what keeps "close" from
+/// being read as "start moving me".
 private struct RailIconButton: View {
     let systemName: String
+    let size: CGFloat
+    let idleTint: Color
     let help: String
     let action: () -> Void
 
@@ -562,10 +584,10 @@ private struct RailIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 9.5, weight: .bold))
-                .foregroundStyle(hovering ? theme.text : theme.text3)
-                .frame(width: RailView.controlSize, height: RailView.controlSize)
-                .background(hovering ? theme.chip : .clear, in: Circle())
+                .font(.system(size: size, weight: .bold))
+                .foregroundStyle(hovering ? theme.text : idleTint)
+                .frame(width: RailView.headerControl, height: RailView.headerControl)
+                .background(theme.text.opacity(hovering ? 0.12 : 0), in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

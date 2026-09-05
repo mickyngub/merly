@@ -501,13 +501,8 @@ struct HandleButton: View {
             Image(systemName: pointingLeading ? "chevron.left" : "chevron.right")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(hovering ? theme.text : theme.text2)
-                // Optical centring, not geometric. Dead-centre in the frame the
-                // chevron reads as pushed toward the panel: the tab's outer edge
-                // is a hard outline while its inner edge dissolves into the panel
-                // body, so the eye sees more room on the outward side. The glyph
-                // also carries its ink off its own box's centre. Nudging back
-                // toward the outer edge puts it where it looks centred.
-                .offset(x: pointingLeading ? 1.5 : -1.5)
+                // Dead-centre in the tab. An earlier "optical" nudge toward the
+                // outer edge read as the glyph sitting off to one side.
                 .frame(width: PanelController.handleOverhang,
                        height: PanelController.handleHeight)
                 // Grabbable a little past the tab's edges without moving the
