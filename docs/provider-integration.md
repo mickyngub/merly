@@ -2,7 +2,7 @@
 
 How Merly obtains **real, provider-reported** rate limits — the same numbers as Claude's `/usage` screen, Codex Analytics, and the Kimi Console. This is the load-bearing knowledge for adding providers or debugging auth; the parsing lives in `Sources/Merly/Data/ProviderAPI.swift`, the orchestration in `Readers.swift`.
 
-Everything here was reverse-engineered from the installed CLIs (June 2026 versions). Endpoints and payload shapes can drift — when something breaks, re-derive from the binaries (see [Re-deriving from the CLIs](#re-deriving-from-the-clis)).
+Everything here was reverse-engineered from the installed CLIs, last re-verified against live responses on **2026-09-05** (Claude Code 2.1.258, Codex CLI 0.152.1, Kimi Code 0.37.2). Endpoints and payload shapes can drift — when something breaks, re-derive from the binaries (see [Re-deriving from the CLIs](#re-deriving-from-the-clis)).
 
 ## Design: API-first, with cache + estimate fallback
 
@@ -68,19 +68,28 @@ The returned blob is JSON. Tokens may be nested under `claudeAiOauth` or flat:
 
 ```jsonc
 {
-  "five_hour":        { "utilization": 23.0, "resets_at": "2026-06-11T22:20:00.311155+00:00" },
-  "seven_day":        { "utilization": 11.0, "resets_at": "2026-06-18T13:00:00+00:00" },
-  "seven_day_sonnet": null,                  // legacy per-model keys — now GOING NULL (see limits[])
+  "five_hour":        { "utilization": 23.0, "resets_at": "2026-06-11T22:20:00.311155+00:00",
+                        "limit_dollars": null, "used_dollars": null, "remaining_dollars": null, "locked_reason": null },
+  "seven_day":        { "utilization": 11.0, "resets_at": "2026-06-18T13:00:00+00:00", ...same extra keys... },
+  "seven_day_sonnet": null,                  // legacy per-model keys, now null (see limits[])
   "seven_day_opus":   null,
-  "extra_usage":      { "is_enabled": false, "monthly_limit": null, ... },
-  "limits": [                                // newer unified array — the live source for per-model caps
-    { "kind": "session",       "group": "session", "percent": 7,  "resets_at": "..." },
-    { "kind": "weekly_all",    "group": "weekly",  "percent": 49, "resets_at": "..." },
-    { "kind": "weekly_scoped", "group": "weekly",  "percent": 83, "resets_at": "...",
-      "scope": { "model": { "id": null, "display_name": "Fable" } }, "is_active": true }
-  ]
+  "seven_day_oauth_apps": null, "seven_day_cowork": null, "seven_day_omelette": null,
+  "tangelo": null, "iguana_necktie": null, "omelette_promotional": null, "cinder_cove": null, ...,
+  "nimbus_quill":     { "utilization": 0.0, "resets_at": null, ... },   // unlabeled experiment buckets, ignored
+  "extra_usage":      { "is_enabled": false, "monthly_limit": null, "user_disabled": true, "daily": null, "weekly": null, ... },
+  "limits": [                                // unified array, the live source for per-model caps
+    { "kind": "session",       "group": "session", "percent": 7,  "severity": "normal", "resets_at": "...", "scope": null, "is_active": true },
+    { "kind": "weekly_all",    "group": "weekly",  "percent": 49, "severity": "normal", "resets_at": "...", "scope": null, "is_active": false },
+    { "kind": "weekly_scoped", "group": "weekly",  "percent": 83, "severity": "normal", "resets_at": "...",
+      "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null }, "is_active": false }
+  ],
+  "spend": { "used": { "amount_minor": 0, "currency": "USD", "exponent": 2 }, "limit": null, "percent": 0,
+             "severity": "normal", "enabled": false, "can_purchase_credits": false, ... },
+  "member_dashboard_available": false
 }
 ```
+
+Shape as of 2026-09-05. Newer than the June payload: per-window `*_dollars` / `locked_reason`, `severity` + `is_active` on each `limits[]` row, `scope.surface`, the `spend` block, and a churn of codenamed experiment buckets at the top level (`nimbus_quill`, `tangelo`, …). None of it is load-bearing for Merly; the decoder only reads `five_hour`, `seven_day`, and `limits[]`. Claude Code itself now calls `/api/oauth/usage?at_wall=1&skip_spend=1` when it hits a limit and filters `weekly_scoped` rows by a remote-config model allowlist, titling them "Current week (Fable)"; it ignores `is_active` too, so a 0% scoped row with `resets_at: null` is a normal idle state, not drift.
 
 - `utilization` is already a percentage (0–100). `resets_at` is ISO 8601 with **microsecond** precision + offset — trim to milliseconds before `ISO8601DateFormatter` (`parseAPIDate` does this).
 - Mapping: `five_hour` → session ring; `seven_day` → "All models" weekly bar.
@@ -110,20 +119,31 @@ The returned blob is JSON. Tokens may be nested under `claudeAiOauth` or flat:
 
 ```jsonc
 {
+  "user_id": "user-…", "account_id": "…", "email": "…",
   "plan_type": "prolite",
   "rate_limit": {
     "allowed": true, "limit_reached": false,
-    "primary_window":   { "used_percent": 8,  "limit_window_seconds": 18000,  "reset_at": 1781214822 },
-    "secondary_window": { "used_percent": 11, "limit_window_seconds": 604800, "reset_at": 1781762602 }
+    "primary_window":   { "used_percent": 28, "limit_window_seconds": 604800, "reset_after_seconds": 190240, "reset_at": 1788787026 },
+    "secondary_window": null
   },
+  "code_review_rate_limit": null,
   "additional_rate_limits": [
-    { "limit_name": "GPT-5.3-Codex-Spark", "metered_feature": "codex_bengalfox",
-      "rate_limit": { "primary_window": {...}, "secondary_window": {...} } }
+    { "limit_name": "GPT-5.3-Codex-Spark", "metered_feature": "codex_bengalfox", "normal_model_slug": null,
+      "rate_limit": { "allowed": true, "limit_reached": false,
+                      "primary_window":   { "used_percent": 0, "limit_window_seconds": 18000,  "reset_after_seconds": 18000,  "reset_at": … },
+                      "secondary_window": { "used_percent": 0, "limit_window_seconds": 604800, "reset_after_seconds": 604800, "reset_at": … } } }
   ],
-  "credits": { "has_credits": false, "balance": "0", ... },
-  "rate_limit_reset_credits": { "available_count": 1, "applicable_available_count": 0 }
+  "model_usage": { "gpt-6-astra": { "available": true, "available_at": null, "credits_would_enable": false } },
+  "credits": { "has_credits": false, "unlimited": false, "overage_limit_reached": false, "balance": "0",
+               "approx_local_messages": [0, 0], "approx_cloud_messages": [0, 0] },
+  "spend_control": { "reached": false, "individual_limit": null },
+  "rate_limit_reached_type": null,
+  "promo": null,
+  "rate_limit_reset_credits": { "available_count": 3, "applicable_available_count": 0 }
 }
 ```
+
+Shape as of 2026-09-05. Newer than the June payload: `reset_after_seconds` beside `reset_at`, `code_review_rate_limit`, `model_usage`, `spend_control`, `rate_limit_reached_type`, `promo`, and `normal_model_slug` on additional limits. Merly reads none of them; the decoder's keys (`rate_limit.*_window`, `additional_rate_limits[]`, `plan_type`, `rate_limit_reset_credits`) are all still present. The binary (now at `/opt/homebrew/Caskroom/codex/<ver>/bin/codex`) still names `/wham/usage` alongside `/api/codex/usage`.
 
 - `primary_window` → the primary limit, **whatever its span**: as of Aug 2026 this account reports `limit_window_seconds: 604800` with `secondary_window: null`, i.e. the primary *is* the weekly budget. Never assume 5h from the field name (see `LimitWindow`).
 - `used_percent` is a plain number; `reset_at` is **epoch seconds** (not ISO). `parseAPIDate` handles both.
@@ -170,16 +190,29 @@ Overridable like the CLI: `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST` (default `h
   "user":  { "userId": "...", "region": "REGION_OVERSEA", "membership": { "level": "LEVEL_BASIC" } },
   "usage": { "limit": "100", "used": "82", "remaining": "18", "resetTime": "2026-06-13T16:08:51.026808Z" },
   "limits": [
-    { "window": { "duration": 300, "timeUnit": "TIME_UNIT_MINUTE" },
+    { "name": "…optional…",                          // CLI 0.37 reads an optional per-row name
+      "window": { "duration": 300, "timeUnit": "TIME_UNIT_MINUTE" },   // MINUTE | HOUR | DAY | WEEK
       "detail": { "limit": "100", "remaining": "100", "resetTime": "2026-06-12T01:08:51Z" } }
   ],
   "parallel":  { "limit": "10" },
-  "totalQuota": { "limit": "100", "remaining": "99" }
+  "totalQuota": { "limit": "100", "remaining": "99" },
+  "boosterWallet": { "balance": { "type": "BOOSTER", "amount": …, "amountLeft": … },   // paid extra-usage wallet, fixed-point 1e6 = 1 cent
+                     "monthlyChargeLimit": { "priceInCents": …, "currency": "USD" }, "monthlyUsed": {…} }
 }
 ```
 
+**When the subscription has lapsed or the credits are spent, the endpoint does not return this at all.** Observed 2026-09-05 on an expired subscription: the token refresh still succeeds, then `GET /usages` answers **HTTP 429** with
+
+```jsonc
+{ "code": "resource_exhausted", "message": "insufficient balance",
+  "details": [{ "type": "common.error.v1.ErrorDetail",
+                "debug": { "reason": "REASON_QUOTA_EXCEEDED", "localizedMessage": { "locale": "en-US", "message": "Credits used up." } } }] }
+```
+
+By status alone that is a transient rate limit: Merly used to show "Rate-limited, won't report quota right now" and back off for 5 minutes, forever. `KimiUsageAPI.classifyUsageFailure` reads the body (`REASON_QUOTA_EXCEEDED`, `exceeded_current_quota_error`, or the CLI's own `kimi-errors.ts` wording patterns: "insufficient balance", "please recharge", "in arrears", "exceeded your current quota") and throws `ProviderAPIError.quotaExhausted`, which classifies as `isAccessDenied` → the `.refused` card ("No usage access · no quota (Credits used up.)"). A 429 whose body doesn't match stays a real rate limit. The CLI's own `fetchManagedUsage` just surfaces the body text for any non-2xx, so this is the same verdict it shows.
+
 - **All numeric values are strings** — parse with `flexDouble` (handles String/Int/Double).
-- `usage` = the weekly summary → "Weekly" bar. `limits[]` = shorter windows; `duration: 300 / TIME_UNIT_MINUTE` is the ~5h rate-limit window → session ring.
+- `usage` = the weekly summary → "Weekly" bar. `limits[]` = shorter windows; `duration: 300 / TIME_UNIT_MINUTE` is the ~5h rate-limit window → session ring. CLI 0.37's `parseManagedUsagePayload` also defaults the `usage` summary's window to 1 week when none is given, so Merly's 7-day assumption matches the CLI's. `timeUnit` now includes `TIME_UNIT_WEEK`; an optional `name` on a row overrides the generated "<span> limit" label. `boosterWallet` (paid extra usage) is parsed by the CLI but not shown by Merly.
 - ⚠️ **`usage` states no window span** — unlike `limits[]`, which carries `duration` + `timeUnit`. "Weekly" is a *documented assumption* (7 × 86400 is passed in by `KimiReader`), which is why the menu bar tags it `wk` rather than claiming `7d`. Observed 2026-08-05 on a `LEVEL_BASIC` / `TYPE_PURCHASE` account: `usage: { limit: "100", used: "100", resetTime: <3 days out> }` with **no `remaining` key**, while `limits[0].detail` read `{ limit: "100", remaining: "100" }` — i.e. the rolling budget genuinely exhausted (100/100 used) while the 5h rate window was untouched. The two are independent; a maxed `usage` with a fresh `limits[0]` is a real state, not a parse error. Note it also makes that provider win the menu bar's "busiest" auto-pick for as long as it stays at 100%.
 - The CLI's parser is deliberately loose because field names drift across versions: `used` vs `remaining` (derive `used = limit - remaining`), `resetTime` vs `resetAt` vs `reset_at`. `KimiUsageAPI.window` mirrors that tolerance.
 - `membership.level` (`LEVEL_BASIC`) → plan label ("Basic").
@@ -208,16 +241,16 @@ If it's Claude-Code / Codex / Kimi-compatible, just add an entry to `~/Library/A
 
 When an endpoint changes, the CLIs are the source of truth. Locations as of June 2026:
 
-- **Kimi:** `~/.kimi-code/bin/kimi` — a ~126 MB bundled-JS binary. The original TS is embedded as `//#region ../../packages/oauth/src/<file>.ts` blocks. Grep with Python:
+- **Kimi:** `~/.kimi-code/bin/kimi` — a ~170 MB bundled-JS binary (0.37.2). The original TS is embedded as `//#region ../../packages/oauth/src/<file>.ts` blocks. Grep with Python:
   ```python
   import os; data = open(os.path.expanduser('~/.kimi-code/bin/kimi'), 'rb').read()
   i = data.find(b'packages/oauth/src/managed-usage.ts'); print(data[i:i+3800].decode('utf-8','replace'))
   ```
-  Key files: `managed-usage.ts` (endpoint + parser), `constants.ts` (`clientId`, `oauthHost`), and the `refreshAccessToken` fn (`/api/oauth/token`, flock).
-- **Codex:** `/opt/homebrew/Caskroom/codex/<ver>/codex-aarch64-apple-darwin` (Rust). `strings | grep` for `/wham/usage`, `/api/codex/usage`, `backend-api`.
-- **Claude:** `/opt/homebrew/Caskroom/claude-code@latest/<ver>/claude` (~222 MB). Contains the usage strings (`/api/oauth/usage`, `five_hour`, `seven_day`). Note the npm `cli.js` under `~/.claude/local/...` may lag and *not* contain them — prefer the Caskroom binary.
+  Key files: `managed-usage.ts` (endpoint + `parseManagedUsagePayload` + `fetchManagedUsage`), `constants.ts` (`clientId`, `oauthHost`), `kimi-errors.ts` (the quota-exhausted wording patterns), and the `refreshAccessToken` fn (`/api/oauth/token`, flock).
+- **Codex:** `/opt/homebrew/Caskroom/codex/<ver>/bin/codex` (Rust; was `codex-aarch64-apple-darwin` in older casks). `strings | grep` for `/wham/usage`, `/api/codex/usage`, `backend-api`.
+- **Claude:** `/opt/homebrew/Caskroom/claude-code@latest/<ver>/claude` (~222 MB). Contains the usage strings (`/api/oauth/usage`, `five_hour`, `seven_day`, `weekly_scoped`); grep around `weekly_scoped` for the `limits[]` filter (`Nue()` in 2.1.258). Note the npm `cli.js` under `~/.claude/local/...` may lag and *not* contain them — prefer the Caskroom binary.
 
-Live probes (read-only except Kimi, which rotates tokens — run sparingly):
+Live probes (read-only except Kimi, which rotates tokens — run sparingly). For Kimi, let Merly do the refresh (`.build/debug/Merly --print`), then reuse the token it persisted while it is still fresh:
 
 ```bash
 # Claude
@@ -231,5 +264,14 @@ a=json.load(open(os.path.expanduser('~/.codex/auth.json')))['tokens']
 r=urllib.request.Request('https://chatgpt.com/backend-api/wham/usage',
   headers={'Authorization':f'Bearer {a["access_token"]}','chatgpt-account-id':a['account_id']})
 print(urllib.request.urlopen(r,timeout=20).read().decode())
+PY
+
+# Kimi (after a Merly --print has just refreshed the token)
+python3 - <<'PY'
+import json,urllib.request,os
+c=json.load(open(os.path.expanduser('~/.kimi-code/credentials/kimi-code.json')))
+r=urllib.request.Request('https://api.kimi.com/coding/v1/usages',headers={'Authorization':'Bearer '+c['access_token']})
+try: print(urllib.request.urlopen(r,timeout=20).read().decode())
+except urllib.error.HTTPError as e: print(e.code, e.read().decode())   # 429 + "insufficient balance" = lapsed, not rate-limited
 PY
 ```
