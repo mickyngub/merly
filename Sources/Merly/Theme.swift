@@ -70,6 +70,10 @@ struct Theme {
 
     /// The app's control accent (settings toggles, the sign-in button hover).
     static let accent = Color(hex: 0x4C8DFF)
+    /// macOS window-button reds and greens, so the rail's close/expand read as the
+    /// controls everyone already knows.
+    static let trafficClose = Color(hex: 0xFF5F57)
+    static let trafficExpand = Color(hex: 0x28C840)
 
     /// The colour a limit is drawn in: its own lane colour (see
     /// `ProviderKind.limitColorHex`), red once it's close to blocking.

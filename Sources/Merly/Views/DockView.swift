@@ -355,13 +355,14 @@ struct RailView: View {
 
     static let mascotPx: CGFloat = 28
     static let spacing: CGFloat = 13
-    /// The header pill: close and expand, each a square control, packed in one
-    /// capsule so they read as a unit rather than two stray glyphs.
-    static let headerControl: CGFloat = 18
-    static let headerGap: CGFloat = 2
-    static let headerPad: CGFloat = 3
-    /// The pill's extent along the rail — its breadth (24) fits inside a mascot.
-    static var headerLength: CGFloat { headerPad * 2 + headerControl * 2 + headerGap }
+    /// The header: close and expand as macOS traffic lights, always side by side
+    /// whichever way the rail runs, so they read as one familiar control.
+    static let dotSize: CGFloat = 12
+    static let dotGap: CGFloat = 8
+    /// The row's extent along the rail: its height as a column, its width as a row.
+    static func headerLength(vertical: Bool) -> CGFloat {
+        vertical ? dotSize : dotSize * 2 + dotGap
+    }
     /// One gauge lane under each mascot, the space above the first, and the gap
     /// between lanes — the menu bar item's proportions scaled up to the rail's
     /// larger mascot.
@@ -403,7 +404,7 @@ struct RailView: View {
         let items = count + 1 // header pill + one mascot per provider
         let perItem = vertical ? itemBlock : mascotPx
         let gaps = CGFloat(max(items - 1, 0)) * spacing
-        return vPadding * 2 + headerLength + CGFloat(count) * perItem + gaps
+        return vPadding * 2 + headerLength(vertical: vertical) + CGFloat(count) * perItem + gaps
     }
 
     /// Points toward where the panel will expand — always away from the edge the
@@ -417,34 +418,20 @@ struct RailView: View {
         }
     }
 
-    /// How far the chevron leans in the expand direction while the rail is hovered:
-    /// a 2pt nudge that says "this pulls open" without a tooltip.
-    private var expandNudge: CGSize {
-        switch edge {
-        case .right: return CGSize(width: -2, height: 0)
-        case .left: return CGSize(width: 2, height: 0)
-        case .top: return CGSize(width: 0, height: 2)
-        case .bottom: return CGSize(width: 0, height: -2)
-        }
-    }
-
     var body: some View {
         let vertical = edge.isVertical
         let layout = vertical
             ? AnyLayout(VStackLayout(spacing: Self.spacing))
             : AnyLayout(HStackLayout(spacing: Self.spacing))
         return layout {
-            layout {
-                RailIconButton(systemName: "xmark", size: 8.5, idleTint: theme.text3,
-                               help: "Close Merly — the menu bar icon brings it back", action: onClose)
-                RailIconButton(systemName: expandGlyph, size: 10, idleTint: theme.text2,
-                               help: "Open usage", action: onExpand)
-                    .offset(hovering ? expandNudge : .zero)
-                    .animation(Theme.snappy(0.4), value: hovering)
+            // Glyphs surface on rail hover, like the window buttons do on a title bar.
+            HStack(spacing: Self.dotGap) {
+                RailDot(color: Theme.trafficClose, systemName: "xmark", showGlyph: hovering,
+                        help: "Close Merly — the menu bar icon brings it back", action: onClose)
+                RailDot(color: Theme.trafficExpand, systemName: expandGlyph, showGlyph: hovering,
+                        help: "Open usage", action: onExpand)
             }
-            .padding(Self.headerPad)
-            .background(theme.chip, in: Capsule())
-            .overlay(Capsule().strokeBorder(theme.hairline, lineWidth: 0.5))
+            .animation(.easeOut(duration: 0.15), value: hovering)
             ForEach(engine.snapshots) { snapshot in
                 item(snapshot)
             }
@@ -568,30 +555,32 @@ struct RailView: View {
     }
 }
 
-/// A control in the rail's header pill. A real Button: a nested Button wins the
+/// One traffic light in the rail's header. A real Button: a nested Button wins the
 /// press against the rail's own drag gesture, which is what keeps "close" from
 /// being read as "start moving me".
-private struct RailIconButton: View {
+private struct RailDot: View {
+    let color: Color
     let systemName: String
-    let size: CGFloat
-    let idleTint: Color
+    let showGlyph: Bool
     let help: String
     let action: () -> Void
 
-    @State private var hovering = false
-    @Environment(\.theme) private var theme
-
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: size, weight: .bold))
-                .foregroundStyle(hovering ? theme.text : idleTint)
-                .frame(width: RailView.headerControl, height: RailView.headerControl)
-                .background(theme.text.opacity(hovering ? 0.12 : 0), in: Circle())
-                .contentShape(Circle())
+            Circle()
+                .fill(color)
+                .frame(width: RailView.dotSize, height: RailView.dotSize)
+                .overlay(Circle().strokeBorder(.black.opacity(0.15), lineWidth: 0.5))
+                .overlay {
+                    Image(systemName: systemName)
+                        .font(.system(size: 6.5, weight: .heavy))
+                        .foregroundStyle(.black.opacity(0.55))
+                        .opacity(showGlyph ? 1 : 0)
+                }
+                // Grabbable a little past the dot without growing it.
+                .contentShape(Circle().inset(by: -4))
         }
         .buttonStyle(.plain)
-        .onHover { hovering = $0 }
         .pointerCursor()
         .help(help)
     }
