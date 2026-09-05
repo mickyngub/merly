@@ -358,7 +358,7 @@ struct RailView: View {
     /// The header: close and expand as macOS traffic lights, always side by side
     /// whichever way the rail runs, so they read as one familiar control.
     static let dotSize: CGFloat = 12
-    static let dotGap: CGFloat = 8
+    static let dotGap: CGFloat = 6
     /// The row's extent along the rail: its height as a column, its width as a row.
     static func headerLength(vertical: Bool) -> CGFloat {
         vertical ? dotSize : dotSize * 2 + dotGap
