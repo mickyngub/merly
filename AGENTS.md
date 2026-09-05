@@ -27,6 +27,7 @@ See [docs/provider-integration.md](docs/provider-integration.md) for exact auth 
 
 ## Footguns
 
+- **A lapsed Kimi subscription answers `/usages` with HTTP 429, not 402/403.** The body says `resource_exhausted` / `insufficient balance` / `REASON_QUOTA_EXCEEDED`. Read by status alone it looks like a transient rate limit ("try again in 5 min"); `KimiUsageAPI.classifyUsageFailure` reads the body and maps it to `.refused` instead. Observed 2026-09-05.
 - **Kimi refresh tokens rotate.** Any refresh MUST hold the `oauth/kimi-code` flock and atomically persist new creds to `credentials/kimi-code.json`, or the user's Kimi CLI login breaks.
 - **Never refresh Claude/Codex tokens.** Risk of racing the CLIs' own refresh; on expiry, fall back to estimates and let the CLI re-auth on next use.
 - Keychain "Always Allow" is tied to the binary's code signature — every ad-hoc rebuild re-prompts. Expected during dev. **Don't "fix" it with a self-signed identity**: that makes `codesign` need a private key, so the *build* starts demanding Keychain access, which is a worse prompt than the one it removes. Tried and reverted — see [docs/specs/distribution.md](docs/specs/distribution.md). Nothing is ever signed *for* distribution; each machine signs its own build (ad-hoc, because Apple Silicon won't run an unsigned binary at all).

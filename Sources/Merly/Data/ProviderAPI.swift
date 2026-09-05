@@ -25,6 +25,10 @@ enum ProviderAPIError: Error, CustomStringConvertible {
     case http(Int)
     case network(String)
     case parse(String)
+    /// The server answered with a quota/balance refusal in the body: a lapsed
+    /// subscription or spent credits. Kimi sends this as a 429, which the plain
+    /// status code would misread as "try again in a few minutes".
+    case quotaExhausted(String)
 
     var description: String {
         switch self {
@@ -33,6 +37,7 @@ enum ProviderAPIError: Error, CustomStringConvertible {
         case .http(let code): "HTTP \(code)"
         case .network(let msg): "network: \(msg)"
         case .parse(let what): "unexpected response (\(what))"
+        case .quotaExhausted(let msg): "no quota (\(msg))"
         }
     }
 
@@ -71,8 +76,11 @@ enum ProviderAPIError: Error, CustomStringConvertible {
     /// classifying it here would permanently brand a healthy subscription "no
     /// usage access". Unlisted codes fall through to the cached/estimate path.
     var isAccessDenied: Bool {
-        guard case .http(let code) = self else { return false }
-        return [402, 403, 404].contains(code)
+        switch self {
+        case .quotaExhausted: return true
+        case .http(let code): return [402, 403, 404].contains(code)
+        default: return false
+        }
     }
 
     /// The server couldn't be reached or is erroring out — offline, DNS failure,
@@ -114,9 +122,12 @@ enum HTTP {
     /// 60s refresh interval, and a healthy endpoint answers in well under it.
     static let timeout: TimeInterval = 10
 
+    /// `classifyFailure` lets a provider read the error *body* of a non-2xx reply
+    /// before it collapses to a bare status code; return nil to keep `.http(status)`.
     static func request(
         _ url: URL, method: String = "GET",
-        headers: [String: String] = [:], formBody: [String: String]? = nil
+        headers: [String: String] = [:], formBody: [String: String]? = nil,
+        classifyFailure: ((Int, Data) -> ProviderAPIError?)? = nil
     ) throws -> [String: Any] {
         var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = method
@@ -149,7 +160,10 @@ enum HTTP {
         case .failure(let error):
             throw ProviderAPIError.network(error.localizedDescription)
         case .success(let (data, status)):
-            guard (200..<300).contains(status) else { throw ProviderAPIError.http(status) }
+            guard (200..<300).contains(status) else {
+                if let classified = classifyFailure?(status, data) { throw classified }
+                throw ProviderAPIError.http(status)
+            }
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 throw ProviderAPIError.parse("not a JSON object")
             }
@@ -419,7 +433,8 @@ enum KimiUsageAPI {
         let token = try freshAccessToken(configDir: configDir)
         let obj = try HTTP.request(
             usageEndpoint,
-            headers: ["Authorization": "Bearer \(token)"]
+            headers: ["Authorization": "Bearer \(token)"],
+            classifyFailure: classifyUsageFailure
         )
 
         func window(_ dict: [String: Any]?, seconds: Double?) -> UsageWindow? {
@@ -446,10 +461,12 @@ enum KimiUsageAPI {
                 let unit = win?["timeUnit"] as? String ?? ""
                 return unit.contains("MINUTE") ? duration * 60
                     : unit.contains("HOUR") ? duration * 3600
-                    : unit.contains("DAY") ? duration * 86400 : duration
+                    : unit.contains("DAY") ? duration * 86400
+                    : unit.contains("WEEK") ? duration * 604800 : duration
             }
             guard let w = window(detail, seconds: seconds) else { continue }
-            let label = seconds == nil ? "Rate limit" : "\(LimitWindow.name(seconds: seconds)) limit"
+            let label = (item["name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? (seconds == nil ? "Rate limit" : "\(LimitWindow.name(seconds: seconds)) limit")
             usage.shortWindows.append((label, w))
         }
         if let user = obj["user"] as? [String: Any],
@@ -458,6 +475,32 @@ enum KimiUsageAPI {
             usage.planLabel = level.replacingOccurrences(of: "LEVEL_", with: "").capitalized
         }
         return usage
+    }
+
+    /// A spent or lapsed Kimi account answers `/usages` with **429**, not 402/403:
+    /// `{"code":"resource_exhausted","message":"insufficient balance", details[].debug
+    /// .reason: "REASON_QUOTA_EXCEEDED"}`. Read by status alone that is a transient
+    /// rate limit; by body it is "no quota on this account". The wording checks
+    /// mirror the CLI's own `kimi-errors.ts` quota-exhausted patterns.
+    static func classifyUsageFailure(status: Int, body: Data) -> ProviderAPIError? {
+        guard let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return nil }
+        let code = obj["code"] as? String ?? ""
+        let message = obj["message"] as? String ?? ""
+        let details = obj["details"] as? [[String: Any]] ?? []
+        let debug = details.compactMap { $0["debug"] as? [String: Any] }.first
+        let reason = debug?["reason"] as? String ?? ""
+        let localized = (debug?["localizedMessage"] as? [String: Any])?["message"] as? String
+
+        let quotaWording = [
+            #"exceeded your current (token )?quota"#, "check your account balance",
+            "insufficient balance", "recharge your account|please recharge",
+            "account (is )?in arrears",
+        ]
+        let exhausted = code == "exceeded_current_quota_error"
+            || reason == "REASON_QUOTA_EXCEEDED"
+            || quotaWording.contains { message.range(of: $0, options: .regularExpression) != nil }
+        guard exhausted else { return nil }
+        return .quotaExhausted(localized ?? (message.isEmpty ? "HTTP \(status)" : message))
     }
 
     /// Mirrors the CLI's refresh protocol: flock the shared lockfile, re-read

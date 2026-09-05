@@ -55,6 +55,28 @@ final class APIHelperTests: XCTestCase {
         XCTAssertFalse(ProviderAPIError.http(401).isAccessDenied)
         XCTAssertFalse(ProviderAPIError.http(429).isAccessDenied)
         XCTAssertFalse(ProviderAPIError.http(500).isAccessDenied)
+        XCTAssertTrue(ProviderAPIError.quotaExhausted("Credits used up.").isAccessDenied)
+        XCTAssertFalse(ProviderAPIError.quotaExhausted("x").isRateLimited)
+    }
+
+    func testKimiQuotaExhaustedBodyBeatsStatusCode() {
+        // Observed 2026-09-05 on a lapsed subscription: a 429 whose body is a
+        // balance refusal, not a rate limit.
+        let lapsed = Data(#"""
+        {"code":"resource_exhausted","message":"insufficient balance","details":[{"type":"common.error.v1.ErrorDetail","debug":{"reason":"REASON_QUOTA_EXCEEDED","localizedMessage":{"locale":"en-US","message":"Credits used up."}}}]}
+        """#.utf8)
+        guard case .quotaExhausted(let msg)? = KimiUsageAPI.classifyUsageFailure(status: 429, body: lapsed) else {
+            return XCTFail("expected quotaExhausted")
+        }
+        XCTAssertEqual(msg, "Credits used up.")
+
+        // Wording alone is enough (the CLI's own kimi-errors.ts patterns).
+        XCTAssertNotNil(KimiUsageAPI.classifyUsageFailure(
+            status: 429, body: Data(#"{"message":"Please recharge your account"}"#.utf8)))
+        // A genuine rate limit, or a non-JSON body, keeps the bare status code.
+        XCTAssertNil(KimiUsageAPI.classifyUsageFailure(
+            status: 429, body: Data(#"{"code":"resource_exhausted","message":"too many requests"}"#.utf8)))
+        XCTAssertNil(KimiUsageAPI.classifyUsageFailure(status: 429, body: Data("<html>".utf8)))
     }
 }
 
