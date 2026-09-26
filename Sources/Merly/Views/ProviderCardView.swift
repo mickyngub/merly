@@ -14,6 +14,7 @@ struct ProviderCardView: View {
     var dragging: Bool = false
     var onEdit: () -> Void = {}
     var onDelete: () -> Void = {}
+    var onHistory: () -> Void = {}
 
     // --expand pre-opens every card (visual QA without scripted clicks)
     @State private var open = QAFlags.expandCards
@@ -310,6 +311,14 @@ struct ProviderCardView: View {
             } else {
                 usageDetail
             }
+
+            Button(action: onHistory) {
+                Label("Usage history", systemImage: "chart.xyaxis.line")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Show saved quota readings over time")
 
             HStack(spacing: 6) {
                 Image(systemName: "folder")

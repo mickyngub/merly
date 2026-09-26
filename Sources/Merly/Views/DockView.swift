@@ -12,6 +12,7 @@ enum DockScreen: Equatable {
     case list(ListMode)
     case settings
     case mascot
+    case history(String)
 
     enum ListMode: Equatable {
         case browsing
@@ -63,6 +64,11 @@ struct DockView: View {
                             withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
                         }
                         .entrance(index: 0, generation: openGeneration)
+                    case .history(let providerID):
+                        UsageHistoryView(engine: engine, providerID: providerID) {
+                            withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
+                        }
+                        .entrance(index: 0, generation: openGeneration)
                     case .list:
                         providerList
                     }
@@ -99,7 +105,8 @@ struct DockView: View {
                     editing: isEditing,
                     dragging: held,
                     onEdit: { withAnimation(Theme.snappy(0.4)) { screen = .list(.editingProvider(snapshot.id)) } },
-                    onDelete: { withAnimation(Theme.snappy(0.4)) { engine.removeProvider(snapshot.id) } }
+                    onDelete: { withAnimation(Theme.snappy(0.4)) { engine.removeProvider(snapshot.id) } },
+                    onHistory: { withAnimation(Theme.snappy(0.4)) { screen = .history(snapshot.id) } }
                 )
                 .background(
                     GeometryReader { geo in

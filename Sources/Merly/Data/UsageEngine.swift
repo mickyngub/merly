@@ -7,6 +7,8 @@ import Combine
 @MainActor
 final class UsageEngine: ObservableObject {
     @Published private(set) var snapshots: [ProviderSnapshot] = []
+    @Published private(set) var historySamples: [UsageHistorySample] = []
+    @Published private(set) var historyError: String?
     @Published private(set) var lastRefresh: Date?
     @Published private(set) var isRefreshing = false
 
@@ -23,6 +25,7 @@ final class UsageEngine: ObservableObject {
     /// during an in-flight pass isn't downgraded to a background poll.
     private var pendingForce = false
     private let workQueue = DispatchQueue(label: "sh.micky.merly.engine", qos: .utility)
+    private let historyStore = UsageHistoryStore()
 
     init() {
         appConfig = ConfigStore.load()
@@ -66,6 +69,7 @@ final class UsageEngine: ObservableObject {
         }
         let config = appConfig
         let cooldownsIn = cooldowns
+        let historyStore = self.historyStore
 
         workQueue.async {
             var ctx = ReaderContext(
@@ -80,11 +84,16 @@ final class UsageEngine: ObservableObject {
             }
             ctx.fileCache.save()
             LastGoodStore.save(ctx.lastGood)
+            historyStore.record(snapshots: results, now: Date())
+            let historySamples = historyStore.samples
+            let historyError = historyStore.errorMessage
             let cooldownsOut = ctx.cooldownUntil
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.cooldowns = cooldownsOut
                 self.snapshots = self.inConfigOrder(results)
+                self.historySamples = historySamples
+                self.historyError = historyError
                 self.lastRefresh = Date()
                 self.isRefreshing = false
                 if self.pendingRefresh {
