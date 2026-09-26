@@ -9,6 +9,8 @@ final class UsageEngine: ObservableObject {
     @Published private(set) var snapshots: [ProviderSnapshot] = []
     @Published private(set) var historySamples: [UsageHistorySample] = []
     @Published private(set) var historyError: String?
+    @Published private(set) var usageReports: [HistoryIdentity: ProviderUsageReport] = [:]
+    @Published private(set) var usageLoading: Set<HistoryIdentity> = []
     @Published private(set) var lastRefresh: Date?
     @Published private(set) var isRefreshing = false
 
@@ -26,6 +28,8 @@ final class UsageEngine: ObservableObject {
     private var pendingForce = false
     private let workQueue = DispatchQueue(label: "sh.micky.merly.engine", qos: .utility)
     private let historyStore = UsageHistoryStore()
+    private let usageQueue = DispatchQueue(label: "sh.micky.merly.analytics", qos: .utility)
+    private let usageStore = UsageAnalyticsStore()
 
     init() {
         appConfig = ConfigStore.load()
@@ -102,6 +106,32 @@ final class UsageEngine: ObservableObject {
                     self.pendingForce = false
                     self.refresh(force: queuedForce)
                 }
+            }
+        }
+    }
+
+    func loadUsageDetails(for config: ProviderConfig, force: Bool = false) {
+        let identity = HistoryIdentity(config: config)
+        guard appConfig.providers.contains(where: { HistoryIdentity(config: $0) == identity }),
+              !usageLoading.contains(identity)
+        else { return }
+
+        if !force, let report = usageReports[identity] {
+            let age = Date().timeIntervalSince(report.loadedAt)
+            if age >= 0, age < 60 { return }
+        }
+
+        usageLoading.insert(identity)
+        let usageStore = self.usageStore
+        usageQueue.async {
+            let report = usageStore.read(config: config, now: Date())
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.usageLoading.remove(identity)
+                guard self.appConfig.providers.contains(where: {
+                    HistoryIdentity(config: $0) == identity
+                }) else { return }
+                self.usageReports[identity] = report
             }
         }
     }

@@ -84,6 +84,14 @@ Merly never sends tokens anywhere except the provider's own API.
 
 **Fallback:** if an API is unreachable or a login is stale, the card falls back to local analysis (Codex: last `rate_limits` event in rollout files; Claude/Kimi: token counts from transcripts relative to your busiest period) and marks the ring with `≈`. Pin `sessionTokenLimit` / `weeklyTokenLimit` in the config to make fallback bars absolute.
 
+## Usage details
+
+Expand a provider card and choose **Usage details**. **Activity** shows local session totals, model and subagent token shares, uncached input, output, cache reads/writes, and recorded active time where available. Choose a recent session or the last 24 hours, 7 days, or 30 days. Stats load on demand without delaying quota refreshes; prompts and responses are never copied into a stats database.
+
+**API value** estimates tokens at standard base rates from [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing) and [OpenAI pricing](https://developers.openai.com/api/docs/pricing), verified September 27, 2026. It is not a subscription bill or a reconstruction of historical charges, discounts, or premium tiers. Unknown models, including unverified Kimi aliases, remain unpriced; partial estimates are labeled. Contributor percentages describe recorded tokens, not exact quota attribution. Line changes and cloud credits are not exposed by the connected readers.
+
+**History** charts provider-reported quota over 24 hours, 7 days, or 30 days, separately for each account and limit window. Collection begins while Merly is running, excludes stale readings and offline estimates, and keeps the latest reading in each five-minute interval for 30 days in `~/Library/Application Support/Merly/usage-history.json`. Charts break at resets and long gaps. Session analytics can read existing local logs; quota history is not backfilled.
+
 ## Adding a provider
 
 Click **Add a provider** in the panel (or edit `~/Library/Application Support/Merly/providers.json`):

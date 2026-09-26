@@ -5,6 +5,7 @@ struct UsageHistoryView: View {
     @ObservedObject var engine: UsageEngine
     let providerID: String
     let onBack: () -> Void
+    var embedded = false
 
     @State private var range: UsageHistoryRange = .hours24
     @State private var selectedWindowID = "primary"
@@ -15,7 +16,10 @@ struct UsageHistoryView: View {
     }
 
     private var currentSnapshot: ProviderSnapshot? {
-        engine.snapshots.first { $0.id == providerID }
+        guard let identity else { return nil }
+        return engine.snapshots.first {
+            $0.id == providerID && HistoryIdentity(config: $0.config) == identity
+        }
     }
 
     private var identity: HistoryIdentity? {
@@ -74,7 +78,9 @@ struct UsageHistoryView: View {
         let accountSubtitle = account.isEmpty ? config.name : "\(config.name) · \(account)"
 
         return VStack(alignment: .leading, spacing: 12) {
-            header(account: accountSubtitle)
+            if !embedded {
+                header(account: accountSubtitle)
+            }
 
             Picker("Period", selection: $range) {
                 ForEach(UsageHistoryRange.allCases) { value in

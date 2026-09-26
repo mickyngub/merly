@@ -426,7 +426,7 @@ struct CodexReader: UsageReader {
                 config: config,
                 sessionPct: usage.primary?.usedPct ?? 0,
                 sessionResetAt: sessionReset(usage.primary),
-                weekly: WeeklyMetric.dedupingLabels(Array(weekly.prefix(4))),
+                weekly: WeeklyMetric.dedupingLabels(weekly),
                 isActive: recentActivity(under: sessionsRoot, now: now),
                 isEstimated: false,
                 sessionWindowSeconds: usage.primary?.windowSeconds,
