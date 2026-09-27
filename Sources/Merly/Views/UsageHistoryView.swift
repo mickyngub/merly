@@ -94,22 +94,30 @@ struct UsageHistoryView: View {
             .accessibilityLabel("History period")
 
             if !availableWindows.isEmpty {
-                Picker("Window", selection: Binding(
-                    get: { selectedWindow?.id ?? "" },
-                    set: { selectedWindowID = $0 }
-                )) {
-                    ForEach(availableWindows) { window in
-                        Text(window.label)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .tag(window.id)
+                HStack(spacing: 8) {
+                    Text("Window")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(theme.text2)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Picker("Window", selection: Binding(
+                        get: { selectedWindow?.id ?? "" },
+                        set: { selectedWindowID = $0 }
+                    )) {
+                        ForEach(availableWindows) { window in
+                            Text(window.label)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .tag(window.id)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .frame(maxWidth: 190, alignment: .trailing)
+                    .tint(Theme.accent)
+                    .accessibilityLabel("Quota window")
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(maxWidth: .infinity)
-                .accessibilityLabel("Quota window")
             }
 
             if liveReadingUnavailable {

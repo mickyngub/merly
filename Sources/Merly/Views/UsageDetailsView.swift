@@ -48,6 +48,12 @@ struct UsageDetailsView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(theme.cardBackground, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .strokeBorder(theme.cardBorder, lineWidth: 1)
+        )
     }
 
     private func details(config: ProviderConfig, identity: HistoryIdentity) -> some View {
@@ -84,6 +90,8 @@ struct UsageDetailsView: View {
                     }
                     .frame(width: max(0, geometry.size.width), alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+                    .padding(.bottom, 8)
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
@@ -102,17 +110,21 @@ struct UsageDetailsView: View {
 
     private func header(config: ProviderConfig) -> some View {
         let account = config.account.trimmingCharacters(in: .whitespacesAndNewlines)
-        return VStack(alignment: .leading, spacing: 8) {
-            backButton
+        return HStack(spacing: 8) {
+            IconButton(systemName: "chevron.left", action: onBack)
+                .accessibilityLabel("Back to providers")
+                .help("Back to providers")
             VStack(alignment: .leading, spacing: 2) {
                 Text("Usage details")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(theme.text)
                 Text(account.isEmpty ? config.name : "\(config.name) · \(account)")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.text2)
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
+            Spacer(minLength: 0)
         }
     }
 
@@ -148,15 +160,17 @@ struct UsageDetailsView: View {
         }
         let loading = engine.usageLoading.contains(identity)
 
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 14) {
             quotaSection(snapshot: snapshot, config: config, now: now)
 
-            sectionRule
+            Divider().overlay(theme.hairline).padding(.vertical, 2)
             analyticsHeader(loading: loading, config: config)
 
             Picker("Activity period", selection: $range) {
                 ForEach(UsageAnalyticsRange.allCases) { option in
-                    Text(option.rawValue).tag(option)
+                    Text(option == .latest ? "Session" : option.rawValue)
+                        .tag(option)
+                        .accessibilityLabel(option == .latest ? "Latest session" : option.rawValue)
                 }
             }
             .pickerStyle(.segmented)
@@ -166,26 +180,36 @@ struct UsageDetailsView: View {
             .accessibilityLabel("Activity period")
 
             if range == .latest, !visibleSessions.isEmpty {
-                Picker("Session", selection: Binding(
-                    get: { effectiveSessionID ?? "" },
-                    set: { selectedSessionID = $0 }
-                )) {
-                    ForEach(visibleSessions) { session in
-                        Text(session.displayName)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("Session")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(theme.text2)
                             .lineLimit(1)
-                            .truncationMode(.middle)
-                            .tag(session.id)
+                        Spacer(minLength: 4)
+                        Picker("Session", selection: Binding(
+                            get: { effectiveSessionID ?? "" },
+                            set: { selectedSessionID = $0 }
+                        )) {
+                            ForEach(visibleSessions) { session in
+                                Text(session.displayName)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .tag(session.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .controlSize(.small)
+                        .frame(maxWidth: 190, alignment: .trailing)
+                        .tint(Theme.accent)
+                        .accessibilityLabel("Root session")
                     }
-                }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(maxWidth: .infinity)
-                .accessibilityLabel("Root session")
-                if sessions.count > visibleSessions.count {
-                    Text("Showing the 50 most recent sessions.")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(theme.text3)
+                    if sessions.count > visibleSessions.count {
+                        Text("Showing the 50 most recent sessions.")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(theme.text3)
+                    }
                 }
             }
 
@@ -200,17 +224,23 @@ struct UsageDetailsView: View {
                         .padding(.vertical, 8)
                 } else {
                     summaryTiles(summary)
+                    Divider().overlay(theme.hairline)
                     activityFacts(summary)
                     modelSection(summary.models, accent: config.resolvedPalette.accent)
-                    tokenBreakdown(summary, accent: config.resolvedPalette.accent)
+                    tokenBreakdown(summary)
                     contributorSection(summary.contributors, accent: config.resolvedPalette.accent)
                     apiValueNote(summary, kind: config.kind)
                 }
             } else if loading {
-                ProgressView("Reading local usage…")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.text2)
-                    .padding(.vertical, 14)
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading local usage…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.text2)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 8)
             } else {
                 Text("No recorded usage in this period.")
                     .font(.system(size: 12))
@@ -300,37 +330,26 @@ struct UsageDetailsView: View {
     private func analyticsHeader(loading: Bool, config: ProviderConfig) -> some View {
         HStack(spacing: 7) {
             Text("Session activity")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(theme.text)
             Spacer(minLength: 4)
             if loading { ProgressView().controlSize(.small) }
-            Button {
+            IconButton(systemName: "arrow.clockwise") {
                 engine.loadUsageDetails(for: config, force: true)
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(theme.text2)
             }
-            .buttonStyle(.plain)
             .disabled(loading)
             .accessibilityLabel("Refresh local usage details")
             .help("Rescan local usage logs")
         }
     }
 
-    private var sectionRule: some View {
-        Rectangle()
-            .fill(theme.hairline)
-            .frame(height: 0.5)
-    }
-
     private func summaryTiles(_ summary: UsageAnalyticsSummary) -> some View {
-        VStack(spacing: 7) {
-            HStack(spacing: 7) {
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 statisticTile("Tokens", value: compactCount(summary.tokens.total))
                 statisticTile("Usage records", value: compactCount(summary.requestCount))
             }
-            HStack(spacing: 7) {
+            HStack(alignment: .top, spacing: 12) {
                 statisticTile(
                     "Cache hit",
                     value: summary.tokens.cacheHitPct.map { "\($0.formatted(.number.precision(.fractionLength(0))))%" } ?? "Not reported"
@@ -343,7 +362,7 @@ struct UsageDetailsView: View {
     private func statisticTile(_ label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
-                .font(.system(size: 9.5, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(theme.text3)
             Text(value)
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -352,10 +371,7 @@ struct UsageDetailsView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
         }
-        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
-        .background(theme.chip, in: RoundedRectangle(cornerRadius: 9))
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
     }
 
     private func apiValueTile(_ summary: UsageAnalyticsSummary) -> some View {
@@ -374,10 +390,10 @@ struct UsageDetailsView: View {
 
         return VStack(alignment: .leading, spacing: 3) {
             Text("API value")
-                .font(.system(size: 9.5, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(theme.text3)
             Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(theme.text)
                 .lineLimit(1)
@@ -388,10 +404,7 @@ struct UsageDetailsView: View {
                     .foregroundStyle(theme.text2)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
-        .background(theme.chip, in: RoundedRectangle(cornerRadius: 9))
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 
@@ -412,17 +425,19 @@ struct UsageDetailsView: View {
     }
 
     private func detailRow(_ label: String, value: String, note: String? = nil) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(label)
-                .font(.system(size: 10.5))
-                .foregroundStyle(theme.text2)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            if let note {
-                Text(note)
-                    .font(.system(size: 9))
-                    .foregroundStyle(theme.text3)
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(theme.text2)
+                    .lineLimit(1)
+                if let note {
+                    Text(note)
+                        .font(.system(size: 9))
+                        .foregroundStyle(theme.text3)
+                }
             }
+            Spacer(minLength: 4)
             Text(value)
                 .font(.system(size: 10.5, weight: .medium))
                 .monospacedDigit()
@@ -462,13 +477,17 @@ struct UsageDetailsView: View {
                     .foregroundStyle(theme.text2)
                     .lineLimit(1)
             }
-            ProgressView(value: item.sharePct, total: 100)
-                .tint(accent)
-                .accessibilityLabel("\(item.label), \(share(item.sharePct)) of recorded tokens")
+            ZStack(alignment: .leading) {
+                Capsule().fill(theme.track)
+                BarFill(fraction: item.sharePct / 100).fill(accent)
+            }
+            .frame(height: 4)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(item.label), \(share(item.sharePct)) of recorded tokens")
         }
     }
 
-    private func tokenBreakdown(_ summary: UsageAnalyticsSummary, accent: Color) -> some View {
+    private func tokenBreakdown(_ summary: UsageAnalyticsSummary) -> some View {
         let model = summary.models.first { $0.id == selectedModelID }
         let tokens = model?.tokens ?? summary.tokens
         let selection = Binding<String>(
@@ -478,22 +497,30 @@ struct UsageDetailsView: View {
 
         return VStack(alignment: .leading, spacing: 8) {
             sectionHeading("Token breakdown")
-            Picker("Model breakdown", selection: selection) {
-                Text("All models").tag(Self.allModelsID)
-                ForEach(summary.models) { item in
-                    Text(item.label)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .tag(item.id)
+            HStack(spacing: 8) {
+                Text("Model")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(theme.text2)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Picker("Model breakdown", selection: selection) {
+                    Text("All models").tag(Self.allModelsID)
+                    ForEach(summary.models) { item in
+                        Text(item.label)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .tag(item.id)
+                    }
                 }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(maxWidth: 190, alignment: .trailing)
+                .tint(Theme.accent)
+                .accessibilityLabel("Choose model for token breakdown")
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .controlSize(.small)
-            .frame(maxWidth: .infinity)
-            .accessibilityLabel("Choose model for token breakdown")
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 detailRow("Input (uncached)", value: compactCount(tokens.input))
                 detailRow("Output", value: compactCount(tokens.output))
                 detailRow("Cache read", value: compactCount(tokens.cacheRead))
@@ -505,10 +532,7 @@ struct UsageDetailsView: View {
                     detailRow("Reasoning output", value: compactCount(tokens.reasoningOutput), note: "Included above")
                 }
             }
-            .padding(10)
-            .background(theme.chip.opacity(0.55), in: RoundedRectangle(cornerRadius: 9))
         }
-        .tint(accent)
     }
 
     private func contributorSection(_ contributors: [UsageBreakdown], accent: Color) -> some View {
