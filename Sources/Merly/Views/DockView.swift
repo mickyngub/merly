@@ -51,31 +51,36 @@ struct DockView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: Self.listSpacing) {
-                    switch screen {
-                    case .mascot:
-                        MascotEditorView(engine: engine) {
-                            withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
-                        }
-                        .entrance(index: 0, generation: openGeneration)
-                    case .settings:
-                        SettingsView(engine: engine) {
-                            withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
-                        }
-                        .entrance(index: 0, generation: openGeneration)
-                    case .usage(let providerID):
-                        UsageDetailsView(engine: engine, providerID: providerID) {
-                            withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
-                        }
-                        .entrance(index: 0, generation: openGeneration)
-                    case .list:
-                        providerList
-                    }
+            if case .usage(let providerID) = screen {
+                UsageDetailsView(engine: engine, providerID: providerID) {
+                    withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
                 }
+                .entrance(index: 0, generation: openGeneration)
                 .padding(EdgeInsets(top: 2, leading: 10, bottom: 12, trailing: 10))
-                .onPreferenceChange(RowHeightKey.self) { height in
-                    if height > 0 { rowStep = height + Self.listSpacing }
+            } else {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: Self.listSpacing) {
+                        switch screen {
+                        case .mascot:
+                            MascotEditorView(engine: engine) {
+                                withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
+                            }
+                            .entrance(index: 0, generation: openGeneration)
+                        case .settings:
+                            SettingsView(engine: engine) {
+                                withAnimation(Theme.snappy(0.4)) { screen = .list(.browsing) }
+                            }
+                            .entrance(index: 0, generation: openGeneration)
+                        case .usage:
+                            EmptyView()
+                        case .list:
+                            providerList
+                        }
+                    }
+                    .padding(EdgeInsets(top: 2, leading: 10, bottom: 12, trailing: 10))
+                    .onPreferenceChange(RowHeightKey.self) { height in
+                        if height > 0 { rowStep = height + Self.listSpacing }
+                    }
                 }
             }
         }

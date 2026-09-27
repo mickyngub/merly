@@ -51,32 +51,43 @@ struct UsageDetailsView: View {
     }
 
     private func details(config: ProviderConfig, identity: HistoryIdentity) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header(config: config)
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 12) {
+                header(config: config)
 
-            Picker("Usage details page", selection: $page) {
-                ForEach(UsageDetailsPage.allCases) { option in
-                    Text(option.rawValue).tag(option)
+                Picker("Usage details page", selection: $page) {
+                    ForEach(UsageDetailsPage.allCases) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel("Usage details page")
+
+                ScrollView(.vertical, showsIndicators: true) {
+                    Group {
+                        switch page {
+                        case .activity:
+                            TimelineView(.periodic(from: .now, by: 60)) { context in
+                                activity(config: config, identity: identity, now: context.date)
+                            }
+                        case .history:
+                            UsageHistoryView(
+                                engine: engine,
+                                providerID: providerID,
+                                onBack: onBack,
+                                embedded: true
+                            )
+                        }
+                    }
+                    .frame(width: max(0, geometry.size.width), alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .pickerStyle(.segmented)
-            .accessibilityLabel("Usage details page")
-
-            switch page {
-            case .activity:
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    activity(config: config, identity: identity, now: context.date)
-                }
-            case .history:
-                UsageHistoryView(
-                    engine: engine,
-                    providerID: providerID,
-                    onBack: onBack,
-                    embedded: true
-                )
-            }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var missingProvider: some View {
@@ -110,6 +121,9 @@ struct UsageDetailsView: View {
             Label("Back", systemImage: "chevron.left")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(theme.text2)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 4)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Back to providers")
@@ -146,6 +160,9 @@ struct UsageDetailsView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(maxWidth: .infinity)
             .accessibilityLabel("Activity period")
 
             if range == .latest, !visibleSessions.isEmpty {
@@ -154,10 +171,16 @@ struct UsageDetailsView: View {
                     set: { selectedSessionID = $0 }
                 )) {
                     ForEach(visibleSessions) { session in
-                        Text(session.displayName).tag(session.id)
+                        Text(session.displayName)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .tag(session.id)
                     }
                 }
                 .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
                 .accessibilityLabel("Root session")
                 if sessions.count > visibleSessions.count {
                     Text("Showing the 50 most recent sessions.")
@@ -458,10 +481,16 @@ struct UsageDetailsView: View {
             Picker("Model breakdown", selection: selection) {
                 Text("All models").tag(Self.allModelsID)
                 ForEach(summary.models) { item in
-                    Text(item.label).tag(item.id)
+                    Text(item.label)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .tag(item.id)
                 }
             }
             .pickerStyle(.menu)
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(maxWidth: .infinity)
             .accessibilityLabel("Choose model for token breakdown")
 
             VStack(alignment: .leading, spacing: 6) {

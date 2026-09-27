@@ -88,6 +88,9 @@ struct UsageHistoryView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(maxWidth: .infinity)
             .accessibilityLabel("History period")
 
             if !availableWindows.isEmpty {
@@ -96,10 +99,16 @@ struct UsageHistoryView: View {
                     set: { selectedWindowID = $0 }
                 )) {
                     ForEach(availableWindows) { window in
-                        Text(window.label).tag(window.id)
+                        Text(window.label)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .tag(window.id)
                     }
                 }
                 .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
                 .accessibilityLabel("Quota window")
             }
 
@@ -185,6 +194,9 @@ struct UsageHistoryView: View {
             Label("Back", systemImage: "chevron.left")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(theme.text2)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 4)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Back to providers")
