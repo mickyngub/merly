@@ -314,7 +314,10 @@ final class PanelController: NSObject {
             ctx.duration = 0.25
             rail.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
-            Task { @MainActor in self?.rail.orderOut(nil) }
+            Task { @MainActor in
+                guard let self, self.state != .rail else { return }
+                self.rail.orderOut(nil)
+            }
         })
     }
 

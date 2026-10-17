@@ -35,9 +35,8 @@ struct DockView: View {
     @State private var refreshSpin = 0.0
     @State private var screen: DockScreen = .list(QAFlags.editMode ? .editing : .browsing)
     @State private var drag: DragReorder?
-    /// One card plus the list's spacing — how far a reorder drag travels per slot.
-    /// Measured rather than assumed: the card's height moves with its content.
-    @State private var rowStep: CGFloat = 0
+    @State private var rowHeights: [String: CGFloat] = [:]
+    @GestureState private var isReordering = false
     @Environment(\.theme) private var theme
 
     /// The list's inline mode, or nil when another screen is up.
@@ -78,22 +77,26 @@ struct DockView: View {
                         }
                     }
                     .padding(EdgeInsets(top: 2, leading: 10, bottom: 12, trailing: 10))
-                    .onPreferenceChange(RowHeightKey.self) { height in
-                        if height > 0 { rowStep = height + Self.listSpacing }
-                    }
+                    .onPreferenceChange(RowHeightsKey.self) { rowHeights = $0 }
                 }
+                .coordinateSpace(name: Self.reorderCoordinateSpace)
+                .scrollDisabled(drag != nil)
             }
         }
         .onChange(of: openGeneration) { _, _ in
+            clearDrag()
             screen = initialScreen == .mascot ? .mascot : .list(QAFlags.editMode ? .editing : .browsing)
         }
-        // Leaving edit mode (or the list entirely) tears the held card's gesture
-        // out from under it, so drop the drag rather than let it strand a card.
-        .onChange(of: isEditing) { _, _ in drag = nil }
+        .onChange(of: isEditing) { _, _ in clearDrag() }
+        .onChange(of: isReordering) { _, active in
+            if !active { clearDrag() }
+        }
+        .onDisappear { clearDrag() }
     }
 
     /// Vertical gap between cards, shared with the drag's row arithmetic.
     private static let listSpacing: CGFloat = 9
+    private static let reorderCoordinateSpace = "provider-reorder-viewport"
 
     @ViewBuilder
     private var providerList: some View {
@@ -115,13 +118,23 @@ struct DockView: View {
                 )
                 .background(
                     GeometryReader { geo in
-                        Color.clear.preference(key: RowHeightKey.self, value: geo.size.height)
+                        Color.clear.preference(
+                            key: RowHeightsKey.self, value: [snapshot.id: geo.size.height]
+                        )
                     }
                 )
                 .offset(y: held ? drag?.offset ?? 0 : 0)
                 // The held card rides above its neighbours as they slide past it.
                 .zIndex(held ? 1 : 0)
                 .gesture(reorderGesture(snapshot), including: isEditing ? .all : .subviews)
+                .accessibilityActions {
+                    if isEditing, index > 0 {
+                        Button("Move up") { move(snapshot.id, by: -1) }
+                    }
+                    if isEditing, index + 1 < engine.snapshots.count {
+                        Button("Move down") { move(snapshot.id, by: 1) }
+                    }
+                }
                 .entrance(index: index, generation: openGeneration)
             }
         }
@@ -141,44 +154,45 @@ struct DockView: View {
         }
     }
 
-    /// Drag-to-reorder, hand-rolled rather than `onDrag`/`onDrop`.
-    ///
-    /// The AppKit drag session behind `onDrag` ends wherever the pointer happens to
-    /// be, and a drop outside the panel fires no delegate at all — so the card it
-    /// had faded to 0.4 stayed faded until edit mode was toggled. A gesture always
-    /// terminates in `onEnded`, so the held card can't be stranded, and it gets to
-    /// follow the cursor instead of trailing a translucent system drag image.
     private func reorderGesture(_ snapshot: ProviderSnapshot) -> some Gesture {
-        DragGesture(minimumDistance: 5)
+        DragGesture(minimumDistance: 5, coordinateSpace: .named(Self.reorderCoordinateSpace))
+            .updating($isReordering) { _, active, _ in
+                if isEditing { active = true }
+            }
             .onChanged { value in
                 guard isEditing else { return }
-                var state = drag ?? DragReorder(id: snapshot.id)
+                let currentIDs = engine.snapshots.map(\.id)
+                guard var state = drag ?? DragReorder(
+                    id: snapshot.id, orderedIDs: currentIDs,
+                    heights: rowHeights, spacing: Self.listSpacing
+                ) else { return }
                 guard state.id == snapshot.id else { return }
-                state.offset = value.translation.height - state.consumed
-
-                if rowStep > 0,
-                   let index = engine.snapshots.firstIndex(where: { $0.id == snapshot.id }) {
-                    // 0.6 of a row, not half: right after a swap the card sits 0.4
-                    // of a row past its new slot, and an exact-half threshold would
-                    // swap it straight back on the next frame, forever.
-                    if state.offset > rowStep * 0.6, index + 1 < engine.snapshots.count {
-                        move(snapshot.id, toIndexOf: engine.snapshots[index + 1].id)
-                        state.consumed += rowStep
-                    } else if state.offset < -rowStep * 0.6, index > 0 {
-                        move(snapshot.id, toIndexOf: engine.snapshots[index - 1].id)
-                        state.consumed -= rowStep
-                    }
-                    state.offset = value.translation.height - state.consumed
+                guard currentIDs == state.orderedIDs else {
+                    clearDrag()
+                    return
                 }
-                // The card must track the cursor exactly, so its offset stays out
-                // of the reorder's animation transaction.
+                state.update(translation: value.translation.height)
+                if let index = currentIDs.firstIndex(of: snapshot.id),
+                   state.insertionIndex != index {
+                    move(snapshot.id, toIndexOf: currentIDs[state.insertionIndex])
+                }
                 var instant = Transaction()
                 instant.disablesAnimations = true
                 withTransaction(instant) { drag = state }
             }
-            .onEnded { _ in
-                withAnimation(Theme.snappy(0.3)) { drag = nil }
-            }
+            .onEnded { _ in clearDrag() }
+    }
+
+    private func clearDrag() {
+        guard drag != nil else { return }
+        withAnimation(Theme.snappy(0.3)) { drag = nil }
+    }
+
+    private func move(_ id: String, by distance: Int) {
+        guard let index = engine.snapshots.firstIndex(where: { $0.id == id }),
+              engine.snapshots.indices.contains(index + distance) else { return }
+        clearDrag()
+        move(id, toIndexOf: engine.snapshots[index + distance].id)
     }
 
     private func move(_ id: String, toIndexOf targetId: String) {
@@ -262,20 +276,10 @@ struct DockView: View {
     }
 }
 
-/// The card being dragged in edit mode: which one, how far it's been pulled from
-/// the slot it currently occupies, and how much of the cursor's travel has already
-/// been spent on rows that swapped underneath it.
-struct DragReorder: Equatable {
-    let id: String
-    var offset: CGFloat = 0
-    var consumed: CGFloat = 0
-}
-
-/// Tallest card in the list — the reorder drag's step size.
-private struct RowHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
+private struct RowHeightsKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, height in height })
     }
 }
 
