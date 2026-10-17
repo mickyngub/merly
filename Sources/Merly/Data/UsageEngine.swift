@@ -145,9 +145,24 @@ final class UsageEngine: ObservableObject {
     /// never read (a provider added mid-pass) keeps the snapshot it already has,
     /// rather than blinking out until the queued refresh catches up.
     private func inConfigOrder(_ results: [ProviderSnapshot]) -> [ProviderSnapshot] {
-        let fresh = Dictionary(results.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let current = Dictionary(snapshots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return appConfig.providers.compactMap { fresh[$0.id] ?? current[$0.id] }
+        Self.reconciledSnapshots(providers: appConfig.providers, results: results, current: snapshots)
+    }
+
+    nonisolated static func reconciledSnapshots(
+        providers: [ProviderConfig],
+        results: [ProviderSnapshot],
+        current: [ProviderSnapshot]
+    ) -> [ProviderSnapshot] {
+        let fresh = Dictionary(results.map { (HistoryIdentity(config: $0.config), $0) },
+                               uniquingKeysWith: { first, _ in first })
+        let previous = Dictionary(current.map { (HistoryIdentity(config: $0.config), $0) },
+                                  uniquingKeysWith: { first, _ in first })
+        return providers.map { provider in
+            let identity = HistoryIdentity(config: provider)
+            var snapshot = fresh[identity] ?? previous[identity] ?? .empty(provider)
+            snapshot.config = provider
+            return snapshot
+        }
     }
 
     /// Append a provider to providers.json and kick a refresh. An empty snapshot
@@ -171,9 +186,7 @@ final class UsageEngine: ObservableObject {
         config.providers[idx] = provider
         ConfigStore.save(config)
         appConfig = config
-        if let sIdx = snapshots.firstIndex(where: { $0.id == provider.id }) {
-            snapshots[sIdx].config = provider
-        }
+        snapshots = Self.reconciledSnapshots(providers: config.providers, results: [], current: snapshots)
         refresh()
     }
 

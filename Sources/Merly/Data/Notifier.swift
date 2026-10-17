@@ -169,9 +169,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private let engine: UsageEngine
     private var cancellables = Set<AnyCancellable>()
 
-    /// Ids currently sitting above the threshold and already alerted — cleared
-    /// when they drop back under, so each fresh crossing alerts once.
-    private var alertedHigh: Set<String> = []
+    private var thresholdState = UsageThresholdState()
     /// Last reading per provider, keyed by window label.
     private var lastWindows: [String: [String: WindowReading]] = [:]
     /// Providers whose first real reading has been seen. The first pass seeds
@@ -221,13 +219,19 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
             let id = snap.id
             let current = windows(of: snap)
+            let crossed = thresholdState.observe(
+                identity: HistoryIdentity(config: snap.config),
+                pressure: snap.pressurePct,
+                threshold: settings.thresholdPct,
+                enabled: settings.enabled
+            )
             defer {
                 lastWindows[id] = current
                 seeded.insert(id)
             }
             guard settings.enabled, seeded.contains(id) else { continue }
 
-            crossingAlert(snap, settings: settings)
+            if crossed { crossingAlert(snap) }
             if settings.notifyOnReset {
                 resetAlert(snap, current: current, previous: lastWindows[id] ?? [:])
             }
@@ -249,14 +253,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Threshold crossing, re-armed once pressure dips back below the line.
-    private func crossingAlert(_ snap: ProviderSnapshot, settings: NotificationSettings) {
+    private func crossingAlert(_ snap: ProviderSnapshot) {
         let pressure = snap.pressurePct
-        guard pressure >= settings.thresholdPct else {
-            alertedHigh.remove(snap.id)
-            return
-        }
-        guard !alertedHigh.contains(snap.id) else { return }
-        alertedHigh.insert(snap.id)
         MacNotifications.post(
             id: "high-\(snap.id)",
             title: "\(snap.config.name) · \(snap.config.account)",
@@ -307,6 +305,18 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .sound])
+    }
+}
+
+struct UsageThresholdState {
+    private var wasHigh: [HistoryIdentity: Bool] = [:]
+
+    mutating func observe(
+        identity: HistoryIdentity, pressure: Double, threshold: Double, enabled: Bool
+    ) -> Bool {
+        let high = pressure >= threshold
+        let previous = wasHigh.updateValue(high, forKey: identity)
+        return enabled && previous == false && high
     }
 }
 
