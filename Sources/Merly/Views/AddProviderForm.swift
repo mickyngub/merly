@@ -346,12 +346,8 @@ struct AddProviderForm: View {
         // from fields would reset them). Color/shiny are fated, not stored.
         provider.sessionTokenLimit = editing?.sessionTokenLimit
         provider.weeklyTokenLimit = editing?.weeklyTokenLimit
-        if editing == nil {
-            engine.addProvider(provider)
-        } else {
-            engine.updateProvider(provider)
-        }
-        onDone()
+        let saved = editing == nil ? engine.addProvider(provider) : engine.updateProvider(provider)
+        if saved { onDone() }
     }
 }
 

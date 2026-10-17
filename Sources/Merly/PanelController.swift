@@ -202,9 +202,10 @@ final class PanelController: NSObject {
         guard state == .rail else { return }
         let snapped = nearestPlacement(for: rail.frame)
         engine.updateRailPlacement(snapped)
-        panelState.railEdge = snapped.edge
-        panelState.dockSide = Self.dockSide(for: snapped)
-        slide(rail, to: railFrame(snapped, onScreen: true), duration: 0.28)
+        let saved = engine.appConfig.railPlacement
+        panelState.railEdge = saved.edge
+        panelState.dockSide = Self.dockSide(for: saved)
+        slide(rail, to: railFrame(saved, onScreen: true), duration: 0.28)
     }
 
     /// Which edge the rail was dropped nearest, and how far along it.

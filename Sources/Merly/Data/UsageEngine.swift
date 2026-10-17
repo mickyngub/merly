@@ -13,8 +13,10 @@ final class UsageEngine: ObservableObject {
     @Published private(set) var usageLoading: Set<HistoryIdentity> = []
     @Published private(set) var lastRefresh: Date?
     @Published private(set) var isRefreshing = false
+    @Published private(set) var configSaveError: String?
 
     private(set) var appConfig: AppConfig
+    private let configURL: URL
     private var timer: Timer?
     /// The cadence the live timer was armed with, so a providers.json edit to
     /// refreshSeconds takes effect on the next refresh instead of after a restart.
@@ -31,8 +33,9 @@ final class UsageEngine: ObservableObject {
     private let usageQueue = DispatchQueue(label: "sh.micky.merly.analytics", qos: .utility)
     private let usageStore = UsageAnalyticsStore()
 
-    init() {
-        appConfig = ConfigStore.load()
+    init(configURL: URL = AppPaths.configFile) {
+        self.configURL = configURL
+        appConfig = ConfigStore.load(from: configURL)
         snapshots = appConfig.providers.map { .empty($0) }
     }
 
@@ -66,7 +69,7 @@ final class UsageEngine: ObservableObject {
         }
         isRefreshing = true
         // Pick up config edits (e.g. a provider added via providers.json).
-        appConfig = ConfigStore.load()
+        appConfig = ConfigStore.load(from: configURL)
         // …including a changed poll cadence, which the armed timer captured.
         if timer != nil, max(appConfig.refreshSeconds, 15) != timerInterval {
             scheduleTimer()
@@ -167,47 +170,49 @@ final class UsageEngine: ObservableObject {
 
     /// Append a provider to providers.json and kick a refresh. An empty snapshot
     /// shows the card immediately; the refresh pass fills in real numbers.
-    /// Mutates the in-memory config like every other mutator — refresh() reloads
-    /// from disk anyway, so re-reading here could only resurrect stale disk state.
-    func addProvider(_ provider: ProviderConfig) {
+    @discardableResult
+    func addProvider(_ provider: ProviderConfig) -> Bool {
         var config = appConfig
         config.providers.append(provider)
-        ConfigStore.save(config)
-        appConfig = config
-        snapshots.append(.empty(provider))
+        guard apply(config) else { return false }
         refresh()
+        return true
     }
 
     /// Replace a provider's config in place (same id), keeping its list position.
     /// Refreshes since the folder/kind may now point at different data.
-    func updateProvider(_ provider: ProviderConfig) {
+    @discardableResult
+    func updateProvider(_ provider: ProviderConfig) -> Bool {
         var config = appConfig
-        guard let idx = config.providers.firstIndex(where: { $0.id == provider.id }) else { return }
+        guard let idx = config.providers.firstIndex(where: { $0.id == provider.id }) else { return false }
+        guard config.providers[idx] != provider else { return true }
         config.providers[idx] = provider
-        ConfigStore.save(config)
-        appConfig = config
-        snapshots = Self.reconciledSnapshots(providers: config.providers, results: [], current: snapshots)
+        guard apply(config) else { return false }
         refresh()
+        return true
     }
 
     /// Drop a provider from providers.json and the live list. No refresh needed —
     /// the remaining snapshots are still current.
-    func removeProvider(_ id: String) {
+    @discardableResult
+    func removeProvider(_ id: String) -> Bool {
         var config = appConfig
+        guard config.providers.contains(where: { $0.id == id }) else { return false }
         config.providers.removeAll { $0.id == id }
-        apply(config)
+        return apply(config)
     }
 
     /// Move the provider `id` to where `targetId` currently sits. Called live as a
     /// dragged card passes over another, so the reorder animates under the cursor.
-    func moveProvider(_ id: String, toIndexOf targetId: String) {
+    @discardableResult
+    func moveProvider(_ id: String, toIndexOf targetId: String) -> Bool {
         var config = appConfig
         guard let from = config.providers.firstIndex(where: { $0.id == id }),
-              let to = config.providers.firstIndex(where: { $0.id == targetId }),
-              from != to else { return }
+              let to = config.providers.firstIndex(where: { $0.id == targetId }) else { return false }
+        guard from != to else { return true }
         config.providers.move(fromOffsets: IndexSet(integer: from),
                               toOffset: to > from ? to + 1 : to)
-        apply(config)
+        return apply(config)
     }
 
     /// True when a config folder is already claimed by an existing provider.
@@ -244,32 +249,35 @@ final class UsageEngine: ObservableObject {
 
     /// Persist tweaked alert settings. Lives in AppConfig so the next refresh
     /// (which reloads from disk) keeps them.
-    func updateNotificationSettings(_ settings: NotificationSettings) {
+    @discardableResult
+    func updateNotificationSettings(_ settings: NotificationSettings) -> Bool {
+        guard settings != appConfig.notificationSettings else { return true }
         var config = appConfig
         config.notificationSettings = settings
-        ConfigStore.save(config)
-        appConfig = config
+        return saveConfig(config)
     }
 
     /// Persist where the rail was dropped. No republish: the panel controller
     /// owns the rail's geometry and has already moved it — this only makes the
     /// placement survive a restart.
-    func updateRailPlacement(_ placement: RailPlacement) {
-        guard placement != appConfig.railPlacement else { return }
+    @discardableResult
+    func updateRailPlacement(_ placement: RailPlacement) -> Bool {
+        guard placement != appConfig.railPlacement else { return true }
         var config = appConfig
         config.railPlacement = placement
-        ConfigStore.save(config)
-        appConfig = config
+        return saveConfig(config)
     }
 
     /// Persist the menu bar's default mascot. Republishes so the status item
     /// (which observes `$snapshots`) re-renders the new look immediately.
-    func updateDefaultMascot(_ mascot: DefaultMascot) {
+    @discardableResult
+    func updateDefaultMascot(_ mascot: DefaultMascot) -> Bool {
+        guard mascot != appConfig.defaultMascotConfig else { return true }
         var config = appConfig
         config.defaultMascotConfig = mascot
-        ConfigStore.save(config)
-        appConfig = config
+        guard saveConfig(config) else { return false }
         republish()
+        return true
     }
 
     /// Tilde-expanded, trailing-slash-stripped path for stable folder comparison.
@@ -279,13 +287,25 @@ final class UsageEngine: ObservableObject {
     }
 
     /// Persist a new provider set and re-derive snapshots in the new order,
-    /// reusing the live readings keyed by id so removed/reordered cards don't
-    /// flash empty.
-    private func apply(_ config: AppConfig) {
-        ConfigStore.save(config)
+    /// reusing readings with a matching identity so reordered cards stay current.
+    private func apply(_ config: AppConfig) -> Bool {
+        guard saveConfig(config) else { return false }
+        snapshots = Self.reconciledSnapshots(providers: config.providers, results: [], current: snapshots)
+        return true
+    }
+
+    private func saveConfig(_ config: AppConfig) -> Bool {
+        guard ConfigStore.save(config, to: configURL) else {
+            configSaveError = "Couldn’t save changes to \(configURL.path). Check that its folder is writable, then try again."
+            return false
+        }
+        configSaveError = nil
         appConfig = config
-        let byId = Dictionary(snapshots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        snapshots = config.providers.compactMap { byId[$0.id] }
+        return true
+    }
+
+    func dismissConfigSaveError() {
+        configSaveError = nil
     }
 
     /// The provider the menu bar reports on: the pinned one while it still exists,
@@ -303,12 +323,15 @@ final class UsageEngine: ObservableObject {
     /// Pin (or unpin, with nil) the provider the menu bar gauge reports.
     /// Republishes so the status item re-renders immediately instead of at the
     /// next refresh tick.
-    func updateMenuBarProvider(_ id: String?) {
+    @discardableResult
+    func updateMenuBarProvider(_ id: String?) -> Bool {
+        guard id != appConfig.menuBarProviderId else { return true }
+        if let id, !appConfig.providers.contains(where: { $0.id == id }) { return false }
         var config = appConfig
         config.menuBarProviderId = id
-        ConfigStore.save(config)
-        appConfig = config
+        guard saveConfig(config) else { return false }
         republish()
+        return true
     }
 
     /// Re-emits `snapshots` unchanged. Observers of the `$snapshots` publisher

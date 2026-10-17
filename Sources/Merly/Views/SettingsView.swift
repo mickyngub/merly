@@ -131,9 +131,18 @@ struct SettingsView: View {
             RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .strokeBorder(theme.cardBorder, lineWidth: 1)
         )
-        .onChange(of: settings) { _, new in engine.updateNotificationSettings(new) }
+        .onChange(of: settings) { _, new in
+            guard new != engine.appConfig.notificationSettings else { return }
+            if !engine.updateNotificationSettings(new) {
+                settings = engine.appConfig.notificationSettings
+            }
+        }
         .onChange(of: menuBarProvider) { _, id in
-            engine.updateMenuBarProvider(id.isEmpty ? nil : id)
+            let providerID = id.isEmpty ? nil : id
+            guard providerID != engine.appConfig.menuBarProviderId else { return }
+            if !engine.updateMenuBarProvider(providerID) {
+                menuBarProvider = engine.appConfig.menuBarProviderId ?? ""
+            }
         }
         .onChange(of: launchAtLogin) { _, on in
             LoginItem.set(on)

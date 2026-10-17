@@ -92,6 +92,14 @@ struct DockView: View {
             if !active { clearDrag() }
         }
         .onDisappear { clearDrag() }
+        .alert("Changes weren’t saved", isPresented: Binding(
+            get: { engine.configSaveError != nil },
+            set: { if !$0 { engine.dismissConfigSaveError() } }
+        )) {
+            Button("OK", role: .cancel) { engine.dismissConfigSaveError() }
+        } message: {
+            Text(engine.configSaveError ?? "")
+        }
     }
 
     /// Vertical gap between cards, shared with the drag's row arithmetic.
@@ -113,7 +121,7 @@ struct DockView: View {
                     editing: isEditing,
                     dragging: held,
                     onEdit: { withAnimation(Theme.snappy(0.4)) { screen = .list(.editingProvider(snapshot.id)) } },
-                    onDelete: { withAnimation(Theme.snappy(0.4)) { engine.removeProvider(snapshot.id) } },
+                    onDelete: { withAnimation(Theme.snappy(0.4)) { _ = engine.removeProvider(snapshot.id) } },
                     onUsage: { withAnimation(Theme.snappy(0.4)) { screen = .usage(snapshot.id) } }
                 )
                 .background(
@@ -129,10 +137,10 @@ struct DockView: View {
                 .gesture(reorderGesture(snapshot), including: isEditing ? .all : .subviews)
                 .accessibilityActions {
                     if isEditing, index > 0 {
-                        Button("Move up") { move(snapshot.id, by: -1) }
+                        Button("Move up") { _ = move(snapshot.id, by: -1) }
                     }
                     if isEditing, index + 1 < engine.snapshots.count {
-                        Button("Move down") { move(snapshot.id, by: 1) }
+                        Button("Move down") { _ = move(snapshot.id, by: 1) }
                     }
                 }
                 .entrance(index: index, generation: openGeneration)
@@ -174,7 +182,10 @@ struct DockView: View {
                 state.update(translation: value.translation.height)
                 if let index = currentIDs.firstIndex(of: snapshot.id),
                    state.insertionIndex != index {
-                    move(snapshot.id, toIndexOf: currentIDs[state.insertionIndex])
+                    guard move(snapshot.id, toIndexOf: currentIDs[state.insertionIndex]) else {
+                        clearDrag()
+                        return
+                    }
                 }
                 var instant = Transaction()
                 instant.disablesAnimations = true
@@ -188,14 +199,14 @@ struct DockView: View {
         withAnimation(Theme.snappy(0.3)) { drag = nil }
     }
 
-    private func move(_ id: String, by distance: Int) {
+    private func move(_ id: String, by distance: Int) -> Bool {
         guard let index = engine.snapshots.firstIndex(where: { $0.id == id }),
-              engine.snapshots.indices.contains(index + distance) else { return }
+              engine.snapshots.indices.contains(index + distance) else { return false }
         clearDrag()
-        move(id, toIndexOf: engine.snapshots[index + distance].id)
+        return move(id, toIndexOf: engine.snapshots[index + distance].id)
     }
 
-    private func move(_ id: String, toIndexOf targetId: String) {
+    private func move(_ id: String, toIndexOf targetId: String) -> Bool {
         withAnimation(Theme.snappy(0.28)) { engine.moveProvider(id, toIndexOf: targetId) }
     }
 
