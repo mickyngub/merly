@@ -364,7 +364,7 @@ final class UsageAnalyticsStoreTests: XCTestCase {
             "usage": usage
         ]
         let unsupportedScope: [String: Any] = [
-            "type": "usage.record", "time": time + 2_000, "usageScope": "session",
+            "type": "usage.record", "time": time + 2_000, "usageScope": "unknown",
             "model": "kimi-k2", "usage": ["inputOther": 500, "output": 500]
         ]
         try analyticsStoreTestWrite([

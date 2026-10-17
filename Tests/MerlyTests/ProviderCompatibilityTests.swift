@@ -99,15 +99,15 @@ final class ProviderCompatibilityTests: XCTestCase {
         XCTAssertEqual(KimiReader.parse(url).values.first?["all"], 15)
     }
 
-    func testKimiValidModernZeroWinsWhileMalformedAndNonturnRecordsDoNot() throws {
+    func testKimiModernZeroPreservesUnrelatedLegacyUsage() throws {
         let legacy = #"{"type":"step.end","usage":{"inputOther":20},"time":1779256800300}"#
         let invalid = #"{"type":"usage.record","usage":{},"usageScope":"turn","time":1779256800302}"#
-        let nonturn = #"{"type":"usage.record","usage":{"inputOther":500},"usageScope":"session","time":1779256800302}"#
+        let nonturn = #"{"type":"usage.record","usage":{"inputOther":500},"usageScope":"unknown","time":1779256800302}"#
         let url = try write([legacy, invalid, nonturn].joined(separator: "\n"), name: "wire.jsonl")
         XCTAssertEqual(KimiReader.parse(url).values.first?["all"], 20)
         let zero = #"{"type":"usage.record","usage":{"inputOther":0},"usageScope":"turn","time":1779256800302}"#
         try Data([legacy, zero].joined(separator: "\n").utf8).write(to: url)
-        XCTAssertEqual(KimiReader.parse(url).values.first?["all"], 0)
+        XCTAssertEqual(KimiReader.parse(url).values.first?["all"], 20)
     }
 
     func testParserCacheVersionReparsesOnlyItsOwnNamespace() {

@@ -119,13 +119,6 @@ final class UsageAnalyticsStore: @unchecked Sendable {
         case legacy(CodexLegacyUsage)
     }
 
-    private struct KimiEventCounters: Equatable {
-        var input: Int
-        var output: Int
-        var cacheRead: Int
-        var cacheWrite: Int
-    }
-
     private let fileManager = FileManager.default
     private lazy var fractionalISO8601: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -835,7 +828,7 @@ final class UsageAnalyticsStore: @unchecked Sendable {
         var malformed = false
         var recordsByID: [String: UsageActivityRecord] = [:]
         var recordOrder: [String] = []
-        var precedingRequestModel: String?
+        var parser = KimiUsageParser()
         let directory = file.url.deletingLastPathComponent()
         let parent = directory.deletingLastPathComponent()
         let isAgentLog = parent.lastPathComponent == "agents"
@@ -848,15 +841,9 @@ final class UsageAnalyticsStore: @unchecked Sendable {
 
         let streamResult = try streamLines(in: file.url) { line, _, terminated in
             guard let object = parseObject(line, terminated: terminated, malformed: &malformed) else { return }
-            let event = object["event"] as? [String: Any] ?? [:]
-            let type = object["type"] as? String ?? event["type"] as? String
-            if type == "token_counting.measured" { return }
-
-            if type == "llm.request" {
-                if let model = nonempty(object["model"] as? String) { precedingRequestModel = model }
-                return
-            }
-
+            parser.consume(object)
+            let event = KimiUsageParser.event(in: object)
+            let type = event["type"] as? String
             if type == "turn.ended" {
                 guard let time = kimiTime(object["time"] ?? event["time"]),
                       let duration = nonnegativeDouble(object["durationMs"] ?? event["durationMs"])
@@ -880,87 +867,20 @@ final class UsageAnalyticsStore: @unchecked Sendable {
                 insertMetric(record, id: id, recordsByID: &recordsByID, order: &recordOrder)
                 return
             }
-
-            let isUsageRecord = type == "usage.record"
-            let isLegacyStep = type == "step.end"
-            let usageValue: Any?
-            let timeValue: Any?
-            if isUsageRecord {
-                usageValue = object["usage"]
-                timeValue = object["time"]
-            } else if isLegacyStep || type == nil {
-                usageValue = event["usage"] ?? object["usage"]
-                timeValue = event["time"] ?? object["time"]
-            } else {
-                return
-            }
-
-            guard let usage = usageValue as? [String: Any] else {
-                malformed = true
-                return
-            }
-            if isUsageRecord, let rawScope = object["usageScope"] {
-                guard let scope = rawScope as? String,
-                      ["turn", "request", "step"].contains(scope)
-                else {
-                    malformed = true
-                    return
-                }
-            }
-            guard let timestampMilliseconds = kimiTime(timeValue),
-                  let counters = kimiCounters(usage), hasTokens(UsageTokenCounts(
-                    input: counters.input,
-                    output: counters.output,
-                    cacheRead: counters.cacheRead,
-                    cacheWrite: counters.cacheWrite
-                  ))
-            else { malformed = true; return }
-
-            let timestamp = Date(timeIntervalSince1970: timestampMilliseconds / 1000)
-            let model = (isUsageRecord ? nonempty(object["model"] as? String) : nil)
-                ?? precedingRequestModel
-                ?? "Unknown model"
-            let eventType = type ?? "legacy-usage"
-            let timeKey = numericIdentifier(timeValue) ?? String(timestampMilliseconds)
-            let canonical = "kimi:usage:\(file.path):\(sessionID):\(eventType):\(timeKey):"
-                + "\(counters.input),\(counters.output),\(counters.cacheRead),\(counters.cacheWrite):\(model)"
-            let metadata = (object["metadata"] as? [String: Any])
-                ?? (event["metadata"] as? [String: Any])
-                ?? [:]
-            let project = nonempty(metadata["cwd"] as? String)
-                ?? nonempty(metadata["workDir"] as? String)
-            let record = UsageActivityRecord(
-                id: canonical,
-                timestamp: timestamp,
-                sessionID: sessionID,
-                agentID: agentID,
-                project: project,
-                model: model,
-                tokens: UsageTokenCounts(
-                    input: counters.input,
-                    output: counters.output,
-                    cacheRead: counters.cacheRead,
-                    cacheWrite: counters.cacheWrite
-                )
-            )
-            if recordsByID[canonical] == nil { recordOrder.append(canonical) }
-            recordsByID[canonical] = record
         }
-
+        for usage in parser.records where usage.tokens.total > 0 {
+            let id = "kimi:usage:\(file.path):\(sessionID):\(usage.id)"
+            let record = UsageActivityRecord(
+                id: id, timestamp: usage.timestamp, sessionID: sessionID, agentID: agentID,
+                project: usage.project, model: usage.model, tokens: usage.tokens
+            )
+            insertMetric(record, id: id, recordsByID: &recordsByID, order: &recordOrder)
+        }
         var parsed = ParsedFile(records: recordOrder.compactMap { recordsByID[$0] })
-        if malformed || streamResult.hadOversizedLine {
+        if malformed || parser.malformed || streamResult.hadOversizedLine {
             parsed.warnings.append(Self.malformedUsageWarning)
         }
         return parsed
-    }
-
-    private func kimiCounters(_ object: [String: Any]) -> KimiEventCounters? {
-        guard let input = requiredCount(object, "inputOther"),
-              let output = requiredCount(object, "output"),
-              let cacheRead = optionalCount(object, "inputCacheRead"),
-              let cacheWrite = optionalCount(object, "inputCacheCreation")
-        else { return nil }
-        return KimiEventCounters(input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite)
     }
 
     private func insertMetric(

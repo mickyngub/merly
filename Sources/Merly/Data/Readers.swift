@@ -588,7 +588,7 @@ struct KimiReader: UsageReader {
                 historyNoun: "sessions",
                 fileFilter: { $0.url.lastPathComponent == "wire.jsonl" },
                 parse: Self.parse,
-                parserVersion: "kimi-v2",
+                parserVersion: "kimi-v3",
                 // Kimi logs don't split by model; keep just the aggregate row.
                 mapWeekly: { weekly in
                     weekly.filter { $0.label == "All models" }
@@ -600,46 +600,19 @@ struct KimiReader: UsageReader {
         return snap
     }
 
-    /// Parses a Kimi wire.jsonl: step.end loop events carry usage + epoch-ms time.
     static func parse(_ url: URL) -> HourBuckets {
-        var legacy: HourBuckets = [:]
-        var modern: HourBuckets = [:]
-        var hasModernUsage = false
+        var parser = KimiUsageParser()
         forEachLine(of: url) { line in
-            guard line.contains("\"usage\"") else { return }
-            guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { return }
-
-            let timeMs = (obj["time"] as? NSNumber)?.doubleValue
-                ?? ((obj["event"] as? [String: Any])?["time"] as? NSNumber)?.doubleValue
-            let usage = ((obj["event"] as? [String: Any])?["usage"] as? [String: Any])
-                ?? (obj["usage"] as? [String: Any])
-            guard let timeMs, timeMs.isFinite,
-                  timeMs / 1000 >= Double(Int.min), timeMs / 1000 < Double(Int.max),
-                  let usage else { return }
-            let isModern = obj["type"] as? String == "usage.record"
-            if isModern && obj["usageScope"] as? String != "turn" { return }
-            let event = obj["event"] as? [String: Any]
-            if !isModern, let type = event?["type"] as? String ?? obj["type"] as? String,
-               type != "step.end" { return }
-
-            let values = ["inputOther", "output", "inputCacheRead", "inputCacheCreation"]
-                .compactMap { usage[$0] as? Int }
-            guard !values.isEmpty, values.allSatisfy({ $0 >= 0 }) else { return }
-            var tokens = 0
-            for value in values {
-                let sum = tokens.addingReportingOverflow(value)
-                guard !sum.overflow else { return }
-                tokens = sum.partialValue
-            }
-
-            let hour = hourEpoch(Date(timeIntervalSince1970: timeMs / 1000))
-            if isModern {
-                hasModernUsage = true
-                modern[hour, default: [:]]["all", default: 0] += tokens
-            } else {
-                legacy[hour, default: [:]]["all", default: 0] += tokens
-            }
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { return }
+            parser.consume(object)
         }
-        return hasModernUsage ? modern : legacy
+        var buckets: HourBuckets = [:]
+        for record in parser.records {
+            let hour = hourEpoch(record.timestamp)
+            let total = buckets[hour]?["all"] ?? 0
+            let sum = total.addingReportingOverflow(record.tokens.total)
+            buckets[hour, default: [:]]["all"] = sum.overflow ? Int.max : sum.partialValue
+        }
+        return buckets
     }
 }
