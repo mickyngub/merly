@@ -149,34 +149,11 @@ final class NotificationPermissionProbe: ObservableObject {
 
 @MainActor
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
-    /// A window is only worth announcing a reset for if it was at least half
-    /// spent — a fresh window that was never under pressure is not news.
-    private static let freedFloor: Double = 50
-    /// Below this counts as "freed" for a window with no reset timestamp to go on.
-    private static let freedCeiling: Double = 10
-    /// How far a window's reset stamp must jump forward to count as a rollover.
-    /// Well past any poll-interval drift, and far short of the shortest real
-    /// window (5h), so a *rolling* window whose stamp creeps forward each pass
-    /// can't be mistaken for one that rolled over.
-    private static let rolloverJump: TimeInterval = 600
-
-    /// One observed limit window, kept between passes so a rollover is detectable.
-    private struct WindowReading {
-        var pct: Double
-        var resetAt: Date?
-    }
-
     private let engine: UsageEngine
     private var cancellables = Set<AnyCancellable>()
 
     private var thresholdState = UsageThresholdState()
-    /// Last reading per provider, keyed by window label.
-    private var lastWindows: [String: [String: WindowReading]] = [:]
-    /// Providers whose first real reading has been seen. The first pass seeds
-    /// state silently: an account already over the line when Merly launches is
-    /// the state of the world, not an event, and firing on it would mean an alert
-    /// every single login.
-    private var seeded: Set<String> = []
+    private var resetState = UsageResetState()
     /// The refresh this manager has already judged, so one completed pass produces
     /// at most one round of alerts. `$snapshots` also fires for republishes that
     /// carry no new readings (a mascot edit, a menu bar re-pin) — those must not
@@ -217,39 +194,20 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             // reset stamp, and only a genuinely new window moves it.
             guard !snap.isUnavailable else { continue }
 
-            let id = snap.id
-            let current = windows(of: snap)
             let crossed = thresholdState.observe(
                 identity: HistoryIdentity(config: snap.config),
                 pressure: snap.pressurePct,
                 threshold: settings.thresholdPct,
                 enabled: settings.enabled
             )
-            defer {
-                lastWindows[id] = current
-                seeded.insert(id)
-            }
-            guard settings.enabled, seeded.contains(id) else { continue }
+            let resetWindows = resetState.observe(
+                snapshot: snap,
+                enabled: settings.enabled && settings.notifyOnReset
+            )
 
             if crossed { crossingAlert(snap) }
-            if settings.notifyOnReset {
-                resetAlert(snap, current: current, previous: lastWindows[id] ?? [:])
-            }
+            resetAlert(snap, windows: resetWindows)
         }
-    }
-
-    /// Every limit window this snapshot reports, keyed by label.
-    ///
-    /// Estimated readings contribute the session window only: their weekly bars are
-    /// "vs your busiest week" ratios that climb toward 100% by construction, so a
-    /// rollover in one means nothing.
-    private func windows(of snap: ProviderSnapshot) -> [String: WindowReading] {
-        var out = [snap.primaryWindowName: WindowReading(pct: snap.sessionPct, resetAt: snap.sessionResetAt)]
-        guard !snap.isEstimated else { return out }
-        for metric in snap.weekly {
-            out[metric.label] = WindowReading(pct: metric.pct, resetAt: metric.resetAt)
-        }
-        return out
     }
 
     /// Threshold crossing, re-armed once pressure dips back below the line.
@@ -265,31 +223,10 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// A window that rolled over and freed real room, announced once per pass per
     /// provider — every reported window, not just the session, because a weekly cap
     /// coming back is the one people actually wait on.
-    private func resetAlert(
-        _ snap: ProviderSnapshot,
-        current: [String: WindowReading],
-        previous: [String: WindowReading]
-    ) {
-        let freed = current
-            .filter { label, now in
-                guard let before = previous[label], before.pct >= Self.freedFloor else { return false }
-                if let wasAt = before.resetAt, let nowAt = now.resetAt {
-                    // The window's next-reset stamp jumped a whole window forward
-                    // and there is room again — a rollover. Usage merely ageing out
-                    // of a rolling window nudges the stamp by a poll interval at
-                    // most, so it can't reach this bar.
-                    return nowAt.timeIntervalSince(wasAt) >= Self.rolloverJump && now.pct < before.pct
-                }
-                // No stamps to compare (an estimate, or a provider that reports
-                // none): fall back to the shape of a reset, a busy window that is
-                // suddenly near-empty.
-                return now.pct <= Self.freedCeiling
-            }
-            .keys
-            .sorted()
-        guard !freed.isEmpty else { return }
+    private func resetAlert(_ snap: ProviderSnapshot, windows: [String]) {
+        guard !windows.isEmpty else { return }
 
-        let windowList = ListFormatter.localizedString(byJoining: freed)
+        let windowList = ListFormatter.localizedString(byJoining: windows)
         MacNotifications.post(
             id: "reset-\(snap.id)",
             title: "\(snap.config.name) · \(snap.config.account) reset",
@@ -317,6 +254,48 @@ struct UsageThresholdState {
         let high = pressure >= threshold
         let previous = wasHigh.updateValue(high, forKey: identity)
         return enabled && previous == false && high
+    }
+}
+
+struct UsageResetState {
+    private static let freedFloor: Double = 50
+    private static let freedCeiling: Double = 10
+    private static let rolloverJump: TimeInterval = 600
+
+    private struct WindowReading {
+        var pct: Double
+        var resetAt: Date?
+    }
+
+    private var lastWindows: [HistoryIdentity: [String: WindowReading]] = [:]
+
+    mutating func observe(snapshot: ProviderSnapshot, enabled: Bool) -> [String] {
+        guard !snapshot.isUnavailable else { return [] }
+        let current = Self.windows(of: snapshot)
+        let identity = HistoryIdentity(config: snapshot.config)
+        guard let previous = lastWindows.updateValue(current, forKey: identity), enabled else { return [] }
+
+        return current
+            .filter { label, now in
+                guard let before = previous[label], before.pct >= Self.freedFloor else { return false }
+                if let wasAt = before.resetAt, let nowAt = now.resetAt {
+                    return nowAt.timeIntervalSince(wasAt) >= Self.rolloverJump && now.pct < before.pct
+                }
+                return now.pct <= Self.freedCeiling
+            }
+            .keys
+            .sorted()
+    }
+
+    private static func windows(of snapshot: ProviderSnapshot) -> [String: WindowReading] {
+        var windows = [snapshot.primaryWindowName: WindowReading(
+            pct: snapshot.sessionPct, resetAt: snapshot.sessionResetAt
+        )]
+        guard !snapshot.isEstimated else { return windows }
+        for metric in snapshot.weekly {
+            windows[metric.label] = WindowReading(pct: metric.pct, resetAt: metric.resetAt)
+        }
+        return windows
     }
 }
 
