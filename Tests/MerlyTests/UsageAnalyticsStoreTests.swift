@@ -394,6 +394,49 @@ final class UsageAnalyticsStoreTests: XCTestCase {
         XCTAssertTrue(report.warnings.contains("Some local usage records could not be decoded. Totals may be incomplete."))
     }
 
+    func testKimiNestedSessionsStaySeparateAndWorkersJoinTheirSession() throws {
+        let directory = try analyticsStoreTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let first = directory.appendingPathComponent("sessions/wd-one/ses-one/agents/main/wire.jsonl")
+        let worker = directory.appendingPathComponent("sessions/wd-one/ses-one/agents/worker-one/wire.jsonl")
+        let second = directory.appendingPathComponent("sessions/wd-one/ses-two/agents/main/wire.jsonl")
+        let time = analyticsStoreTestNow.timeIntervalSince1970 * 1000
+        func usageLine(input: Int, offset: Double) throws -> String {
+            try analyticsStoreTestLine([
+                "type": "usage.record", "time": time + offset * 1000,
+                "model": "kimi-k2", "usage": ["inputOther": input, "output": 5]
+            ])
+        }
+        try analyticsStoreTestWrite([try usageLine(input: 10, offset: 0)], to: first)
+        try analyticsStoreTestWrite([
+            try usageLine(input: 30, offset: 1),
+            try analyticsStoreTestLine([
+                "type": "turn.ended", "time": time + 1500,
+                "turnId": 0, "durationMs": 2500
+            ])
+        ], to: worker)
+        try analyticsStoreTestWrite([try usageLine(input: 20, offset: 2)], to: second)
+        let now = analyticsStoreTestNow.addingTimeInterval(3)
+
+        let report = UsageAnalyticsStore().read(
+            config: analyticsStoreTestConfig(kind: .kimi, directory: directory), now: now
+        )
+        let sessions = UsageAnalytics.sessions(in: report, now: now)
+        let firstSession = UsageAnalytics.summarize(report, range: .latest, sessionID: "ses-one", now: now)
+        let latestSession = UsageAnalytics.summarize(report, range: .latest, now: now)
+        let workerRecords = report.records.filter { $0.agentID == "worker-one" }
+
+        XCTAssertEqual(sessions.map(\.id), ["ses-two", "ses-one"])
+        XCTAssertEqual(firstSession.tokens.total, 50)
+        XCTAssertEqual(firstSession.requestCount, 2)
+        XCTAssertEqual(firstSession.contributors.count, 2)
+        XCTAssertEqual(latestSession.tokens.total, 25)
+        XCTAssertEqual(workerRecords.count, 2)
+        XCTAssertTrue(workerRecords.allSatisfy { $0.sessionID == "ses-one" })
+        XCTAssertEqual(workerRecords.first { $0.activeSeconds != nil }?.activeSeconds, 2.5)
+        XCTAssertEqual(report.records.filter { $0.agentID == nil }.count, 2)
+    }
+
     func testCacheReusesUnchangedFilesAndReplacesChangedOrTruncatedFiles() throws {
         let directory = try analyticsStoreTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

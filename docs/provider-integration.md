@@ -4,6 +4,8 @@ How Merly obtains **real, provider-reported** rate limits — the same numbers a
 
 Everything here was reverse-engineered from the installed CLIs, last re-verified against live responses on **2026-09-05** (Claude Code 2.1.258, Codex CLI 0.152.1, Kimi Code 0.37.2). Endpoints and payload shapes can drift — when something breaks, re-derive from the binaries (see [Re-deriving from the CLIs](#re-deriving-from-the-clis)).
 
+Kimi compatibility was additionally checked against the [official 2.2.0 release](https://github.com/MoonshotAI/kimi-code/releases/tag/%40moonshot-ai%2Fkimi-code%402.2.0) source on **2026-10-18**. This was a source and fixture check, not a live authenticated API probe.
+
 ## Design: API-first, with cache + estimate fallback
 
 Each reader tries the live API first. The failure ladder (`apiFirst` in `Readers.swift`) is:
@@ -166,23 +168,23 @@ Shape as of 2026-09-05. Newer than the June payload: `reset_after_seconds` besid
 
 ⚠️ **The access token lives only 15 minutes (`expires_in: 900`), so it is almost always expired when we read it — we must refresh, and the refresh token ROTATES.** If we refresh and don't persist the new refresh token back, the user's `kimi` CLI is logged out on its next launch. This is the single most dangerous integration in the app.
 
-Replicate the CLI's exact protocol (`KimiUsageAPI.freshAccessToken`):
+Coordinate with both supported CLI lock protocols (`KimiUsageAPI.freshAccessToken`):
 
 1. If `expires_at > now + 60`, use the cached `access_token` — no refresh.
-2. Otherwise acquire an **exclusive `flock`** on `~/.kimi-code/oauth/kimi-code` (the CLI's own lockfile; serializes refreshes across the CLI and us so we don't both spend the same single-use refresh token).
+2. Otherwise acquire a nonblocking **exclusive `flock`** on `~/.kimi-code/oauth/kimi-code` for older clients, and atomically create the newer CLI's `oauth/kimi-code.lock` directory. Keep its modification time fresh while the request runs; current Kimi uses `proper-lockfile` with a five-second stale threshold. Contention fails closed. Merly never removes another owner's lock, including an abandoned one; the CLI handles stale-lock recovery.
 3. **Re-read** the credentials under the lock — another process may have refreshed while we waited; if it's now fresh, use it.
 4. `POST https://auth.kimi.com/api/oauth/token`, form-encoded:
    - `client_id = 17e5f671-d194-4dfb-9706-5516cb48c098`  (Kimi Code's public OAuth client id, from the binary)
    - `grant_type = refresh_token`
    - `refresh_token = <current>`
    - Response: `{ access_token, refresh_token, expires_in, scope, token_type }`
-5. **Atomically persist** the rotated creds: write `credentials/kimi-code.json.tmp`, then `replaceItemAt`. Update `access_token`, `refresh_token` (if returned), `expires_in`, and recompute `expires_at = now + expires_in`.
-6. Release the lock.
+5. **Atomically persist** the rotated creds: write a uniquely named temporary file next to the credentials, then `replaceItemAt`. Update `access_token`, `refresh_token` (if returned), `expires_in`, and recompute `expires_at = now + expires_in`.
+6. Stop the heartbeat and release only locks still owned by this operation. If ownership is lost after a token grant, adopt a fresh credential already written by the CLI when possible; otherwise report a coordination failure without overwriting another writer. A compromised lock can still require signing in again.
 
-Overridable like the CLI: `KIMI_CODE_OAUTH_HOST` / `KIMI_OAUTH_HOST` (default `https://auth.kimi.com`).
+Merly uses the default mainland OAuth host, `https://auth.kimi.com`. The CLI's global/custom endpoint pairs and their `kimi-code-env-<hash>.json` credential slots are not currently supported; the CLI's host overrides do not change Merly's endpoints.
 
 **Endpoint:** `GET https://api.kimi.com/coding/v1/usages`
-(Base overridable via `KIMI_CODE_BASE_URL`, default `https://api.kimi.com/coding/v1`, then `+ /usages`.)
+(The CLI can override its base with `KIMI_CODE_BASE_URL`; Merly uses the default URL above.)
 **Headers:** `Authorization: Bearer <token>`
 
 ```jsonc
@@ -217,7 +219,9 @@ By status alone that is a transient rate limit: Merly used to show "Rate-limited
 - The CLI's parser is deliberately loose because field names drift across versions: `used` vs `remaining` (derive `used = limit - remaining`), `resetTime` vs `resetAt` vs `reset_at`. `KimiUsageAPI.window` mirrors that tolerance.
 - `membership.level` (`LEVEL_BASIC`) → plan label ("Basic").
 
-**Fallback:** estimate from `~/.kimi-code/sessions/wd_*/ses_*/agents/main/wire.jsonl` — `step.end` events carry `usage: {inputOther, output, inputCacheRead, inputCacheCreation}` and an epoch-ms `time` (`KimiReader.estimate` + `TokenWindowEstimator`).
+**Current usage response:** Kimi Code 2.2.0 reads `usages.limit_5h`, `limit_7d`, `limit_month_total`, and `limit_month_code`. Each reports `used_ratio` and `reset_time`. Merly supports these alongside the older `usage`/`limits` response above, promotes the shortest reported window, and keeps monthly labels distinct from weekly limits. An unrecognized response is a parse failure, never a reported zero.
+
+**Fallback:** estimate from `~/.kimi-code/sessions/wd_*/ses_*/agents/main/wire.jsonl`. Modern turn-scoped `usage.record` events take precedence over legacy `step.end` measurements so the same work is not counted twice. Both carry `usage: {inputOther, output, inputCacheRead, inputCacheCreation}` and an epoch-ms `time`. The Kimi parse-cache namespace changes with this interpretation. Analytics derive the session identity above `agents`, keeping worker identity separate; legacy direct `ses_*/wire.jsonl` paths remain supported.
 
 ---
 

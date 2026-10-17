@@ -420,8 +420,7 @@ enum CodexUsageAPI {
 
 enum KimiUsageAPI {
     struct Usage {
-        var weekly: UsageWindow?
-        var shortWindows: [(label: String, window: UsageWindow)] = []
+        var windows: [(label: String, window: UsageWindow)] = []
         var planLabel: String?
     }
 
@@ -436,39 +435,67 @@ enum KimiUsageAPI {
             headers: ["Authorization": "Bearer \(token)"],
             classifyFailure: classifyUsageFailure
         )
+        return try parseUsage(obj)
+    }
 
+    static func parseUsage(_ obj: [String: Any]) throws -> Usage {
         func window(_ dict: [String: Any]?, seconds: Double?) -> UsageWindow? {
-            guard let dict, let limit = flexDouble(dict["limit"]), limit > 0 else { return nil }
+            guard let dict, let limit = flexDouble(dict["limit"]), limit.isFinite, limit > 0 else { return nil }
             let used = flexDouble(dict["used"])
                 ?? flexDouble(dict["remaining"]).map { limit - $0 }
-                ?? 0
+            guard let used, used.isFinite else { return nil }
             return UsageWindow(
-                usedPct: min(100, max(0, used / limit * 100)),
+                usedPct: min(1, max(0, used / limit)) * 100,
                 resetsAt: parseAPIDate(dict["resetTime"] ?? dict["resetAt"] ?? dict["reset_at"]),
                 windowSeconds: seconds
             )
         }
 
-        var usage = Usage(weekly: window(obj["usage"] as? [String: Any], seconds: 7 * 86400))
-        // Kimi's extra windows are unlabeled, so labels are generated from the
-        // span; the reader dedupes any that collide (see WeeklyMetric.dedupingLabels).
-        for item in obj["limits"] as? [[String: Any]] ?? [] {
-            let detail = (item["detail"] as? [String: Any]) ?? item
-            let win = item["window"] as? [String: Any]
-            // Reported as duration + unit; an unrecognised unit means the value is
-            // already seconds.
-            let seconds = flexDouble(win?["duration"]).map { duration -> Double in
-                let unit = win?["timeUnit"] as? String ?? ""
-                return unit.contains("MINUTE") ? duration * 60
-                    : unit.contains("HOUR") ? duration * 3600
-                    : unit.contains("DAY") ? duration * 86400
-                    : unit.contains("WEEK") ? duration * 604800 : duration
+        var usage = Usage()
+        if let modern = obj["usages"] as? [String: Any] {
+            let definitions: [(String, String, Double?)] = [
+                ("limit_5h", "5h", 5 * 3600),
+                ("limit_7d", "Weekly", 7 * 86400),
+                ("limit_month_total", "Monthly total", nil),
+                ("limit_month_code", "Monthly code", nil),
+            ]
+            for (key, label, seconds) in definitions {
+                guard let entry = modern[key] as? [String: Any],
+                      let ratio = flexDouble(entry["used_ratio"]), ratio.isFinite else { continue }
+                usage.windows.append((label, UsageWindow(
+                    usedPct: min(1, max(0, ratio)) * 100,
+                    resetsAt: parseAPIDate(entry["reset_time"]), windowSeconds: seconds
+                )))
             }
-            guard let w = window(detail, seconds: seconds) else { continue }
-            let label = (item["name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-                ?? (seconds == nil ? "Rate limit" : "\(LimitWindow.name(seconds: seconds)) limit")
-            usage.shortWindows.append((label, w))
         }
+        if usage.windows.isEmpty {
+            if let week = window(obj["usage"] as? [String: Any], seconds: 7 * 86400) {
+                usage.windows.append(("Weekly", week))
+            }
+            for item in obj["limits"] as? [[String: Any]] ?? [] {
+                let detail = (item["detail"] as? [String: Any]) ?? item
+                let win = item["window"] as? [String: Any]
+                let seconds = flexDouble(win?["duration"]).flatMap { duration -> Double? in
+                    guard duration.isFinite, duration > 0 else { return nil }
+                    let unit = win?["timeUnit"] as? String ?? ""
+                    let result = unit.contains("MINUTE") ? duration * 60
+                        : unit.contains("HOUR") ? duration * 3600
+                        : unit.contains("DAY") ? duration * 86400
+                        : unit.contains("WEEK") ? duration * 604800 : duration
+                    return result.isFinite ? result : nil
+                }
+                guard let w = window(detail, seconds: seconds) else { continue }
+                let label = (item["name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                    ?? (seconds == nil ? "Rate limit" : "\(LimitWindow.name(seconds: seconds)) limit")
+                usage.windows.append((label, w))
+            }
+        }
+        guard !usage.windows.isEmpty else { throw ProviderAPIError.parse("no valid Kimi usage windows") }
+        usage.windows = usage.windows.enumerated().sorted {
+            let left = $0.element.window.windowSeconds ?? .infinity
+            let right = $1.element.window.windowSeconds ?? .infinity
+            return left == right ? $0.offset < $1.offset : left < right
+        }.map(\.element)
         if let user = obj["user"] as? [String: Any],
            let membership = user["membership"] as? [String: Any],
            let level = membership["level"] as? String {
@@ -503,11 +530,12 @@ enum KimiUsageAPI {
         return .quotaExhausted(localized ?? (message.isEmpty ? "HTTP \(status)" : message))
     }
 
-    /// Mirrors the CLI's refresh protocol: flock the shared lockfile, re-read
-    /// creds (another process may have refreshed first), refresh if still
-    /// stale, and persist — refresh tokens rotate, so losing the new one
-    /// would log the CLI out.
-    private static func freshAccessToken(configDir: String) throws -> String {
+    static func freshAccessToken(
+        configDir: String,
+        refresh: ([String: String]) throws -> [String: Any] = {
+            try HTTP.request(KimiUsageAPI.tokenEndpoint, method: "POST", formBody: $0)
+        }
+    ) throws -> String {
         let credsURL = URL(fileURLWithPath: configDir).appendingPathComponent("credentials/kimi-code.json")
         let lockPath = configDir + "/oauth/kimi-code"
 
@@ -518,12 +546,15 @@ enum KimiUsageAPI {
                   let creds = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let token = creds["access_token"] as? String
             else { throw ProviderAPIError.noCredentials("credentials/kimi-code.json") }
+            guard !token.isEmpty else {
+                throw ProviderAPIError.expiredToken("Kimi credentials were revoked — run kimi to re-auth")
+            }
             return (creds, token)
         }
 
         var (creds, accessToken) = try load()
         let now = Date().timeIntervalSince1970
-        if let expiresAt = flexDouble(creds["expires_at"]), expiresAt > now + 60 {
+        if let expiresAt = flexDouble(creds["expires_at"]), expiresAt.isFinite, expiresAt > now + 60 {
             return accessToken
         }
 
@@ -531,62 +562,85 @@ enum KimiUsageAPI {
             atPath: (lockPath as NSString).deletingLastPathComponent,
             withIntermediateDirectories: true
         )
-        let fd = open(lockPath, O_WRONLY | O_CREAT, 0o644)
+        let fd = open(lockPath, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o644)
         guard fd >= 0 else { throw ProviderAPIError.network("cannot open refresh lock") }
         // Refreshing without the lock is exactly the race that logs the user's
         // CLI out (two refreshers, one rotated token lost) — so a failed flock
         // aborts the refresh rather than proceeding unlocked.
-        guard flock(fd, LOCK_EX) == 0 else {
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             close(fd)
             throw ProviderAPIError.network("cannot acquire refresh lock")
         }
         defer { flock(fd, LOCK_UN); close(fd) }
 
-        (creds, accessToken) = try load() // re-read under the lock
-        if let expiresAt = flexDouble(creds["expires_at"]), expiresAt > now + 60 {
-            return accessToken
-        }
-        guard let refreshToken = creds["refresh_token"] as? String else {
-            throw ProviderAPIError.expiredToken("no refresh token — run kimi to re-auth")
-        }
+        return try KimiRefreshLock.withLock(at: lockPath) { lock in
+            (creds, accessToken) = try load()
+            if let expiresAt = flexDouble(creds["expires_at"]), expiresAt.isFinite,
+               expiresAt > Date().timeIntervalSince1970 + 60 {
+                return accessToken
+            }
+            guard let refreshToken = creds["refresh_token"] as? String, !refreshToken.isEmpty else {
+                throw ProviderAPIError.expiredToken("no refresh token — run kimi to re-auth")
+            }
 
-        let tok: [String: Any]
-        do {
-            tok = try HTTP.request(
-                tokenEndpoint,
-                method: "POST",
-                formBody: [
-                    "client_id": clientId,
-                    "grant_type": "refresh_token",
-                    "refresh_token": refreshToken,
-                ]
-            )
-        } catch let ProviderAPIError.http(code) where (400..<500).contains(code) {
-            // A 4xx on a refresh_token grant means the grant itself is dead
-            // (OAuth `invalid_grant` — the login lapsed, often because the CLI
-            // re-authed elsewhere and rotated the token). Surface it as an auth
-            // lapse so the card says "sign in again" instead of a cryptic 400.
-            throw ProviderAPIError.expiredToken("refresh rejected (\(code)) — run kimi to re-auth")
-        }
-        guard let access = tok["access_token"] as? String else {
-            throw ProviderAPIError.expiredToken("refresh rejected — run kimi to re-auth")
-        }
+            let tok: [String: Any]
+            try lock.assertOwnership()
+            do {
+                tok = try refresh([
+                        "client_id": clientId,
+                        "grant_type": "refresh_token",
+                        "refresh_token": refreshToken,
+                    ])
+            } catch let ProviderAPIError.http(code) where (400..<500).contains(code) && code != 429 {
+                // A 4xx on a refresh_token grant means the grant itself is dead
+                // (OAuth `invalid_grant` — the login lapsed, often because the CLI
+                // re-authed elsewhere and rotated the token). Surface it as an auth
+                // lapse so the card says "sign in again" instead of a cryptic 400.
+                throw ProviderAPIError.expiredToken("refresh rejected (\(code)) — run kimi to re-auth")
+            }
+            guard let access = tok["access_token"] as? String, !access.isEmpty else {
+                throw ProviderAPIError.expiredToken("refresh rejected — run kimi to re-auth")
+            }
 
-        creds["access_token"] = access
-        if let newRefresh = tok["refresh_token"] as? String, !newRefresh.isEmpty {
-            creds["refresh_token"] = newRefresh
+            creds["access_token"] = access
+            if let newRefresh = tok["refresh_token"] as? String, !newRefresh.isEmpty {
+                creds["refresh_token"] = newRefresh
+            }
+            let expiresIn = flexDouble(tok["expires_in"]) ?? 900
+            guard expiresIn.isFinite, expiresIn > 0,
+                  expiresIn < Double(Int.max) - Date().timeIntervalSince1970 else {
+                throw ProviderAPIError.parse("invalid Kimi token expiry")
+            }
+            creds["expires_in"] = Int(expiresIn)
+            creds["expires_at"] = Int(Date().timeIntervalSince1970 + expiresIn)
+            if let scope = tok["scope"] as? String { creds["scope"] = scope }
+            if let type = tok["token_type"] as? String { creds["token_type"] = type }
+
+            func verifyOwnership() throws -> String? {
+                do {
+                    try lock.assertOwnership()
+                    return nil
+                } catch {
+                    if let winner = try? load(),
+                       let winnerRefresh = winner.creds["refresh_token"] as? String,
+                       !winnerRefresh.isEmpty, winnerRefresh != refreshToken,
+                       let expiry = flexDouble(winner.creds["expires_at"]), expiry.isFinite,
+                       expiry > Date().timeIntervalSince1970 + 60 {
+                        return winner.accessToken
+                    }
+                    throw error
+                }
+            }
+            if let winner = try verifyOwnership() { return winner }
+            let out = try JSONSerialization.data(withJSONObject: creds)
+            let tmp = credsURL.appendingPathExtension("tmp.\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            try out.write(to: tmp)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp.path)
+            if let winner = try verifyOwnership() { return winner }
+            _ = try FileManager.default.replaceItemAt(credsURL, withItemAt: tmp)
+
+            return access
         }
-        let expiresIn = flexDouble(tok["expires_in"]) ?? 900
-        creds["expires_in"] = Int(expiresIn)
-        creds["expires_at"] = Int(now + expiresIn)
-        if let scope = tok["scope"] as? String { creds["scope"] = scope }
-        if let type = tok["token_type"] as? String { creds["token_type"] = type }
-
-        let out = try JSONSerialization.data(withJSONObject: creds)
-        let tmp = credsURL.appendingPathExtension("tmp")
-        try out.write(to: tmp)
-        _ = try FileManager.default.replaceItemAt(credsURL, withItemAt: tmp)
-
-        return access
     }
 }

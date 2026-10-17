@@ -836,7 +836,15 @@ final class UsageAnalyticsStore: @unchecked Sendable {
         var recordsByID: [String: UsageActivityRecord] = [:]
         var recordOrder: [String] = []
         var precedingRequestModel: String?
-        let sessionID = file.url.deletingLastPathComponent().lastPathComponent
+        let directory = file.url.deletingLastPathComponent()
+        let parent = directory.deletingLastPathComponent()
+        let isAgentLog = parent.lastPathComponent == "agents"
+        let sessionID = isAgentLog
+            ? parent.deletingLastPathComponent().lastPathComponent
+            : directory.lastPathComponent
+        let agentID = isAgentLog && directory.lastPathComponent != "main"
+            ? directory.lastPathComponent
+            : nil
 
         let streamResult = try streamLines(in: file.url) { line, _, terminated in
             guard let object = parseObject(line, terminated: terminated, malformed: &malformed) else { return }
@@ -865,6 +873,7 @@ final class UsageAnalyticsStore: @unchecked Sendable {
                     id: id,
                     timestamp: timestamp,
                     sessionID: sessionID,
+                    agentID: agentID,
                     project: project,
                     activeSeconds: duration / 1000
                 )
@@ -924,6 +933,7 @@ final class UsageAnalyticsStore: @unchecked Sendable {
                 id: canonical,
                 timestamp: timestamp,
                 sessionID: sessionID,
+                agentID: agentID,
                 project: project,
                 model: model,
                 tokens: UsageTokenCounts(

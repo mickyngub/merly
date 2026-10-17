@@ -189,6 +189,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// Span of the primary window `sessionPct` measures, when the provider reports
     /// one. Not always 5h — see `LimitWindow`.
     var sessionWindowSeconds: Double? = nil
+    var primaryWindowLabel: String? = nil
     /// True when these are the last *real* API numbers, served because the live
     /// fetch failed transiently (e.g. HTTP 429). Real, just not fresh.
     var isStale: Bool = false
@@ -231,10 +232,11 @@ struct ProviderSnapshot: Identifiable, Equatable {
     }
     /// What to call the primary window: "5h" for a rolling session, "Weekly" for a
     /// provider like Codex whose primary limit spans 7 days.
-    var primaryWindowName: String { LimitWindow.name(seconds: sessionWindowSeconds) }
+    var primaryWindowName: String { primaryWindowLabel ?? LimitWindow.name(seconds: sessionWindowSeconds) }
+    var hasMonthlyPrimary: Bool { primaryWindowName == "Monthly total" || primaryWindowName == "Monthly code" }
 
     /// True when the primary window is short enough to be a "current session".
-    var hasSessionWindow: Bool { !LimitWindow.isWeekly(seconds: sessionWindowSeconds) }
+    var hasSessionWindow: Bool { !hasMonthlyPrimary && !LimitWindow.isWeekly(seconds: sessionWindowSeconds) }
 
     /// The reported window closest to full, when it outranks the 5h session — the
     /// limit that actually gates the next request, and so the one the ring
@@ -345,6 +347,9 @@ struct ProviderSnapshot: Identifiable, Equatable {
         // "7d" because a weekly window's exact length isn't always reported (Kimi
         // states none for its rolling budget).
         let weekliest = reportedWeekly.filter(\.isWeekly).max(by: { $0.pct < $1.pct })
+        if hasMonthlyPrimary {
+            return [lane("mo", sessionPct, isEstimated, label: primaryWindowName)]
+        }
 
         // The primary window is the session lane only when it's short enough to be
         // one. Codex's spans 7 days, so there the primary *is* the weekly lane.
@@ -379,7 +384,8 @@ struct ProviderSnapshot: Identifiable, Equatable {
         // Top bar first, matching the draw order, so the list can be read off the
         // icon rather than matched against it.
         let readings = lanes.map { lane in
-            let window = lane.window == "wk" ? "weekly limit" : "\(lane.window) window"
+            let window = lane.window == "wk" ? "weekly limit"
+                : lane.window == "mo" ? "\(primaryWindowName.lowercased()) limit" : "\(lane.window) window"
             return "\(window) \(lane.estimated ? "≈" : "")\(Int(lane.pct.rounded()))% used"
         }
         return "\(who) — \(readings.joined(separator: " · "))"
@@ -419,6 +425,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
         return RealReading(
             sessionPct: sessionPct, sessionResetAt: sessionResetAt,
             weekly: weekly, planNote: plan, capturedAt: now,
+            sessionWindowSeconds: sessionWindowSeconds, primaryWindowLabel: primaryWindowLabel,
             resetCredits: resetCredits
         )
     }
@@ -429,7 +436,9 @@ struct ProviderSnapshot: Identifiable, Equatable {
         let ageText = age < 1 ? "moments ago" : age < 60 ? "\(age)m ago" : "\(age / 60)h ago"
         return ProviderSnapshot(
             config: config, sessionPct: reading.sessionPct, sessionResetAt: reading.sessionResetAt,
-            weekly: reading.weekly, isActive: false, isEstimated: false, isStale: true,
+            weekly: reading.weekly, isActive: false, isEstimated: false,
+            sessionWindowSeconds: reading.sessionWindowSeconds, primaryWindowLabel: reading.primaryWindowLabel,
+            isStale: true,
             note: "as of \(ageText)", plan: reading.planNote,
             resetCredits: reading.resetCredits
         )
@@ -443,7 +452,8 @@ enum UsageFormatting {
     /// What's standing between you and the next request, for the clock line. Kept
     /// short enough to sit on one line beside the mascot and the ring.
     static func blockingText(_ blocking: WeeklyMetric, now: Date) -> String {
-        let word = blocking.isWeekly ? "Weekly" : "5h cap"
+        let word = blocking.label == "Monthly total" || blocking.label == "Monthly code"
+            ? "Monthly" : blocking.isWeekly ? "Weekly" : "5h cap"
         // Terse because the wider nested ring leaves this line ~136pt; the clock
         // glyph beside it already supplies "resets".
         guard let resetAt = blocking.resetAt else { return "\(word) maxed" }
@@ -471,6 +481,8 @@ struct RealReading: Codable {
     var weekly: [WeeklyMetric]
     var planNote: String?
     var capturedAt: Date
+    var sessionWindowSeconds: Double? = nil
+    var primaryWindowLabel: String? = nil
     /// Optional so readings cached before reset credits existed still decode.
     var resetCredits: ResetCredits? = nil
 }

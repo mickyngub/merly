@@ -164,9 +164,10 @@ struct FileBucketCache: Codable {
     /// Returns cached buckets when (mtime, size) match, else parses and stores.
     mutating func buckets(
         for url: URL, mtime: Date, size: Int,
+        parserVersion: String? = nil,
         parse: (URL) -> HourBuckets
     ) -> HourBuckets {
-        let key = url.path
+        let key = parserVersion.map { "\(url.path)#parser=\($0)" } ?? url.path
         if let entry = entries[key], entry.mtime == mtime.timeIntervalSince1970, entry.size == size {
             return entry.buckets
         }

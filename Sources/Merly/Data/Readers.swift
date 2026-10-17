@@ -20,6 +20,12 @@ private let apiCooldown: TimeInterval = 300
 /// How old a cached real reading may be and still beat a local estimate.
 private let maxStaleAge: TimeInterval = 6 * 3600
 
+func usageCacheKey(for config: ProviderConfig) -> String {
+    let directory = URL(fileURLWithPath: config.expandedDir, isDirectory: true).standardizedFileURL.path
+    return [config.id, config.kind.rawValue, directory]
+        .map { "\($0.utf8.count):\($0)" }.joined()
+}
+
 /// Shared API-first wrapper: honor any active cooldown, attempt the live fetch,
 /// and on failure prefer a recent cached real reading over the local fallback.
 /// Records 429s as cooldowns and successes as last-good readings.
@@ -30,10 +36,11 @@ private func apiFirst(
     fetch: () throws -> ProviderSnapshot,
     fallback: (_ fetchError: Error?) -> ProviderSnapshot
 ) -> ProviderSnapshot {
+    let cacheKey = usageCacheKey(for: config)
     // A user-initiated (forced) refresh ignores the post-429 cooldown so an
     // explicit click always re-attempts the live fetch instead of silently
     // returning stale cache. The cooldown still throttles the background poll.
-    let cooling = !ctx.force && (ctx.cooldownUntil[config.id].map { $0 > now } ?? false)
+    let cooling = !ctx.force && (ctx.cooldownUntil[cacheKey].map { $0 > now } ?? false)
     // A cooldown is itself the reason: the only thing that sets one is a 429. Left
     // as a nil error, the fallback read it as "unexplained" and papered over a
     // standing rate limit with a local estimate.
@@ -43,20 +50,20 @@ private func apiFirst(
         do {
             let snapshot = try fetch()
             if let reading = snapshot.realReading(at: now) {
-                ctx.lastGood[config.id] = reading
+                ctx.lastGood[cacheKey] = reading
             }
-            ctx.cooldownUntil[config.id] = nil
+            ctx.cooldownUntil[cacheKey] = nil
             return snapshot
         } catch {
             fetchError = error
             if case ProviderAPIError.http(429) = error {
-                ctx.cooldownUntil[config.id] = now.addingTimeInterval(apiCooldown)
+                ctx.cooldownUntil[cacheKey] = now.addingTimeInterval(apiCooldown)
             }
         }
     }
 
     // Prefer the last real numbers over a misleading estimate.
-    if let cached = ctx.lastGood[config.id],
+    if let cached = ctx.lastGood[cacheKey],
        now.timeIntervalSince(cached.capturedAt) < maxStaleAge {
         var snapshot = ProviderSnapshot.fromCache(cached, config: config, now: now)
         // Explain *why* it's stuck on old numbers: an endpoint that's rate-limiting
@@ -258,6 +265,7 @@ private func estimateSnapshot(
     historyNoun: String,
     fileFilter: (CandidateFile) -> Bool = { _ in true },
     parse: (URL) -> HourBuckets,
+    parserVersion: String? = nil,
     sessionWindowSeconds: Double? = nil,
     mapWeekly: ([WeeklyMetric]) -> [WeeklyMetric] = { $0 }
 ) -> ProviderSnapshot {
@@ -272,7 +280,8 @@ private func estimateSnapshot(
 
     var merged: HourBuckets = [:]
     for file in files {
-        let buckets = cache.buckets(for: file.url, mtime: file.mtime, size: file.size, parse: parse)
+        let buckets = cache.buckets(for: file.url, mtime: file.mtime, size: file.size,
+                                    parserVersion: parserVersion, parse: parse)
         mergeBuckets(&merged, buckets)
     }
 
@@ -452,31 +461,28 @@ struct CodexReader: UsageReader {
     /// Offline fallback: the newest rate_limits event a rollout file captured.
     /// Returns nil when no rollout rate-limit data exists on disk at all, so the
     /// caller can distinguish "real but stale numbers" from a true no-data state.
-    private func rolloutFallback(config: ProviderConfig, now: Date, root: URL) -> ProviderSnapshot? {
+    func rolloutFallback(config: ProviderConfig, now: Date, root: URL) -> ProviderSnapshot? {
         guard FileManager.default.fileExists(atPath: root.path) else { return nil }
         let files = jsonlFiles(under: root, modifiedWithinDays: 8)
             .sorted { $0.mtime > $1.mtime }
         guard !files.isEmpty else { return nil }
 
-        // Files are newest-mtime-first, so the first file that holds any
-        // rate_limits event wins — its mtime bounds every event inside it, making
-        // it at least as fresh as anything an older file could hold. The prefix
-        // caps the tail-reads when many recent rollouts carry no limits at all.
         var best: (date: Date, limits: [String: Any])?
         for file in files.prefix(12) {
-            if let found = Self.lastRateLimits(in: file.url) {
+            if let found = Self.lastRateLimits(in: file.url),
+               best.map({ found.date > $0.date }) ?? true {
                 best = found
-                break
             }
         }
         guard let (eventDate, limits) = best else { return nil }
 
-        func window(_ key: String) -> (pct: Double, resetsAt: Date?)? {
+        func window(_ key: String) -> (pct: Double, resetsAt: Date?, seconds: Double?)? {
             guard let w = limits[key] as? [String: Any],
                   let pct = (w["used_percent"] as? NSNumber)?.doubleValue
             else { return nil }
             let resets = (w["resets_at"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
-            return (pct, resets)
+            let seconds = flexDouble(w["window_minutes"]).map { $0 * 60 }
+            return (pct, resets, seconds)
         }
 
         var sessionPct = 0.0
@@ -498,7 +504,8 @@ struct CodexReader: UsageReader {
                 pct: stillCurrent ? secondary.pct : 0,
                 resetText: secondary.resetsAt.map {
                     stillCurrent ? "Weekly limit · resets \(resetFormatter.string(from: $0))" : "Weekly limit · rolled over"
-                } ?? "Weekly limit"
+                } ?? "Weekly limit",
+                resetAt: stillCurrent ? secondary.resetsAt : nil
             ))
         }
 
@@ -509,6 +516,7 @@ struct CodexReader: UsageReader {
         return ProviderSnapshot(
             config: config, sessionPct: sessionPct, sessionResetAt: sessionResetAt,
             weekly: weekly, isActive: active, isEstimated: true,
+            sessionWindowSeconds: window("primary")?.seconds,
             note: ageMin > 60 ? "as of \(ageMin / 60)h ago" : nil, plan: plan
         )
     }
@@ -548,22 +556,14 @@ struct KimiReader: UsageReader {
         defer { ctx.fileCache = fileCache }
         var snap = apiFirst(config: config, ctx: &ctx, now: now, fetch: {
             let usage = try KimiUsageAPI.fetch(configDir: config.expandedDir)
-            // session ring = the shortest reported window (the ~5h rate limit)
-            let session = usage.shortWindows.first?.window
-            var weekly: [WeeklyMetric] = []
-            if let week = usage.weekly {
-                weekly.append(WeeklyMetric(
-                    label: "Weekly", pct: week.usedPct,
-                    resetText: weeklyResetText(week.resetsAt),
-                    resetAt: week.resetsAt
-                ))
-            }
-            for (label, window) in usage.shortWindows.dropFirst() {
-                weekly.append(WeeklyMetric(
+            let session = usage.windows.first?.window
+            let weekly = usage.windows.dropFirst().map { label, window in
+                WeeklyMetric(
                     label: label, pct: window.usedPct,
                     resetText: window.resetsAt.map { "Resets \(resetFormatter.string(from: $0))" } ?? "",
-                    resetAt: window.resetsAt, isWeeklyWindow: false
-                ))
+                    resetAt: window.resetsAt,
+                    isWeeklyWindow: window.windowSeconds.map { LimitWindow.isWeekly(seconds: $0) } ?? false
+                )
             }
             return ProviderSnapshot(
                 config: config,
@@ -573,6 +573,9 @@ struct KimiReader: UsageReader {
                 isActive: recentActivity(under: sessionsRoot, now: now),
                 isEstimated: false,
                 sessionWindowSeconds: session?.windowSeconds,
+                primaryWindowLabel: usage.windows.first.flatMap {
+                    $0.window.windowSeconds == nil ? $0.label : nil
+                },
                 plan: usage.planLabel
             )
         }, fallback: { error in
@@ -585,6 +588,7 @@ struct KimiReader: UsageReader {
                 historyNoun: "sessions",
                 fileFilter: { $0.url.lastPathComponent == "wire.jsonl" },
                 parse: Self.parse,
+                parserVersion: "kimi-v2",
                 // Kimi logs don't split by model; keep just the aggregate row.
                 mapWeekly: { weekly in
                     weekly.filter { $0.label == "All models" }
@@ -598,7 +602,9 @@ struct KimiReader: UsageReader {
 
     /// Parses a Kimi wire.jsonl: step.end loop events carry usage + epoch-ms time.
     static func parse(_ url: URL) -> HourBuckets {
-        var buckets: HourBuckets = [:]
+        var legacy: HourBuckets = [:]
+        var modern: HourBuckets = [:]
+        var hasModernUsage = false
         forEachLine(of: url) { line in
             guard line.contains("\"usage\"") else { return }
             guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { return }
@@ -607,17 +613,33 @@ struct KimiReader: UsageReader {
                 ?? ((obj["event"] as? [String: Any])?["time"] as? NSNumber)?.doubleValue
             let usage = ((obj["event"] as? [String: Any])?["usage"] as? [String: Any])
                 ?? (obj["usage"] as? [String: Any])
-            guard let timeMs, let usage else { return }
+            guard let timeMs, timeMs.isFinite,
+                  timeMs / 1000 >= Double(Int.min), timeMs / 1000 < Double(Int.max),
+                  let usage else { return }
+            let isModern = obj["type"] as? String == "usage.record"
+            if isModern && obj["usageScope"] as? String != "turn" { return }
+            let event = obj["event"] as? [String: Any]
+            if !isModern, let type = event?["type"] as? String ?? obj["type"] as? String,
+               type != "step.end" { return }
 
-            let tokens = (usage["inputOther"] as? Int ?? 0)
-                + (usage["output"] as? Int ?? 0)
-                + (usage["inputCacheRead"] as? Int ?? 0)
-                + (usage["inputCacheCreation"] as? Int ?? 0)
-            guard tokens > 0 else { return }
+            let values = ["inputOther", "output", "inputCacheRead", "inputCacheCreation"]
+                .compactMap { usage[$0] as? Int }
+            guard !values.isEmpty, values.allSatisfy({ $0 >= 0 }) else { return }
+            var tokens = 0
+            for value in values {
+                let sum = tokens.addingReportingOverflow(value)
+                guard !sum.overflow else { return }
+                tokens = sum.partialValue
+            }
 
             let hour = hourEpoch(Date(timeIntervalSince1970: timeMs / 1000))
-            buckets[hour, default: [:]]["all", default: 0] += tokens
+            if isModern {
+                hasModernUsage = true
+                modern[hour, default: [:]]["all", default: 0] += tokens
+            } else {
+                legacy[hour, default: [:]]["all", default: 0] += tokens
+            }
         }
-        return buckets
+        return hasModernUsage ? modern : legacy
     }
 }
