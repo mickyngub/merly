@@ -31,7 +31,7 @@ ProviderCard
 
 **Persistence.** Last-good readings live in `~/Library/Application Support/Merly/last-good.json` (`LastGoodStore`); the file-parse cache for estimation lives in `usage-cache.json`. Both are safe to delete.
 
-Refresh runs every 60s off the main thread (`UsageEngine.workQueue`), threading a `ReaderContext` (file cache + last-good + cooldowns) through all readers in one pass. All HTTP is synchronous via the `HTTP` helper in `ProviderAPI.swift` (a semaphore-blocked `URLSession` task) — fine because it's never on the main thread.
+By default, refresh runs every 5 minutes in the rail or while hidden, and every 2 minutes with the panel expanded. Opening the panel immediately requests a refresh while respecting provider cooldowns. `refreshSeconds` customizes the expanded interval; background polling never runs faster than every 5 minutes. Readers run off the main thread (`UsageEngine.workQueue`), threading a `ReaderContext` (file cache + last-good + cooldowns) through each pass. All HTTP is synchronous via the `HTTP` helper in `ProviderAPI.swift` (a semaphore-blocked `URLSession` task), never on the main thread.
 
 ---
 

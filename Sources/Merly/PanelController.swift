@@ -32,7 +32,9 @@ final class PanelState: ObservableObject {
 final class PanelController: NSObject {
     enum DockState { case hidden, open, rail }
 
-    private(set) var state: DockState = .hidden
+    private(set) var state: DockState = .hidden {
+        didSet { engine.setPanelOpen(state == .open) }
+    }
 
     static let panelWidth: CGFloat = 336
     /// How far the collapse tab bulges out past the panel's inner edge.

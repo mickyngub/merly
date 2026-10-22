@@ -17,10 +17,14 @@ final class UsageEngine: ObservableObject {
 
     private(set) var appConfig: AppConfig
     private let configURL: URL
+    private var isPanelOpen = false
     private var timer: Timer?
-    /// The cadence the live timer was armed with, so a providers.json edit to
-    /// refreshSeconds takes effect on the next refresh instead of after a restart.
+    /// The effective cadence captured by the live timer, so config edits
+    /// take effect on the next refresh instead of after a restart.
     private var timerInterval: TimeInterval = 0
+    private var pollingInterval: TimeInterval {
+        max(appConfig.refreshSeconds, isPanelOpen ? 15 : 300)
+    }
     private var cooldowns: [String: Date] = [:]
     /// Set when refresh() is called mid-pass, so config edits (e.g. a provider
     /// just added) aren't lost to the in-flight pass's stale config.
@@ -44,11 +48,16 @@ final class UsageEngine: ObservableObject {
         scheduleTimer()
     }
 
-    /// (Re)arms the poll timer at the configured cadence, flooring it so a typo'd
-    /// refreshSeconds can't hammer the APIs.
+    func setPanelOpen(_ isOpen: Bool) {
+        guard isPanelOpen != isOpen else { return }
+        isPanelOpen = isOpen
+        if timer != nil { scheduleTimer() }
+    }
+
+    /// Config and visibility changes restart the effective cadence from re-arm time.
     private func scheduleTimer() {
         timer?.invalidate()
-        timerInterval = max(appConfig.refreshSeconds, 15)
+        timerInterval = pollingInterval
         timer = Timer.scheduledTimer(withTimeInterval: timerInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
@@ -71,7 +80,7 @@ final class UsageEngine: ObservableObject {
         // Pick up config edits (e.g. a provider added via providers.json).
         appConfig = ConfigStore.load(from: configURL)
         // …including a changed poll cadence, which the armed timer captured.
-        if timer != nil, max(appConfig.refreshSeconds, 15) != timerInterval {
+        if timer != nil, pollingInterval != timerInterval {
             scheduleTimer()
         }
         let config = appConfig

@@ -112,7 +112,7 @@ Click **Add a provider** in the panel (or edit `~/Library/Application Support/Me
 - `style`: `cat`, `catTie`, `robot`, `round` — the critter's silhouette.
 - `palette`: `coral`, `steel`, `green`, `purple`, `gold`, `pink`.
 
-The app picks up config changes on the next refresh (≤60s, or hit the refresh button). For a genuinely new backend, see [docs/provider-integration.md](docs/provider-integration.md).
+By default, Merly refreshes every 5 minutes in the rail or while hidden, and every 2 minutes with the panel expanded. Opening the panel immediately requests a refresh while respecting provider cooldowns. `refreshSeconds` customizes the expanded interval; background polling never runs faster than every 5 minutes. Config changes take effect on the next refresh. For a genuinely new backend, see [docs/provider-integration.md](docs/provider-integration.md).
 
 ## Privacy & security
 

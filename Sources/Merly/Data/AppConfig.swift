@@ -105,7 +105,7 @@ struct AppConfig: Codable {
     /// install isn't an empty window.
     static let `default` = AppConfig(
         sessionHours: 5,
-        refreshSeconds: 60,
+        refreshSeconds: 120,
         providers: knownProviders.map(\.config),
         notifications: NotificationSettings(),
         defaultMascot: .standard
@@ -117,7 +117,7 @@ struct AppConfig: Codable {
         let detected = autodetectedProviders()
         guard !detected.isEmpty else { return .default }
         return AppConfig(
-            sessionHours: 5, refreshSeconds: 60, providers: detected,
+            sessionHours: 5, refreshSeconds: Self.default.refreshSeconds, providers: detected,
             notifications: NotificationSettings(), defaultMascot: .standard
         )
     }
