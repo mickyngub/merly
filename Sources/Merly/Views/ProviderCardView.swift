@@ -151,6 +151,9 @@ struct ProviderCardView: View {
                 // Level + XP as a tiny progress bar beneath the sprite.
                 if let game = snapshot.game, !snapshot.isUnavailable {
                     MascotLevelBar(level: game.level, xp: game.xpInLevel, accent: accent)
+                } else {
+                    MascotLevelBar(level: 0, xp: 0, accent: accent)
+                        .hidden()
                 }
             }
 
@@ -242,6 +245,7 @@ struct ProviderCardView: View {
                     RingView(estimated: snapshot.isEstimated, limits: ringLimits)
                 }
             }
+            .frame(width: editing ? nil : 58, height: editing ? nil : 58)
             // The ring is a circle, so its widest point lands exactly on the reset
             // line — the row's longest text. Without this they nearly touch.
             .padding(.leading, 6)
