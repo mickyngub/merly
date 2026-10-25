@@ -510,13 +510,11 @@ struct MascotStreakBadge: View {
 
     @Environment(\.theme) private var theme
 
-    /// Loaded from the `Resources` subdirectory — `.copy("Resources")` preserves
-    /// the folder in the bundle, so `Image(_:bundle:)` (which only searches the
-    /// bundle root / asset catalog) can't find it. Same path the sprites use.
+    /// Loaded by URL because `.copy("Resources")` preserves the folder in the
+    /// bundle, so `Image(_:bundle:)` (which only searches the bundle root /
+    /// asset catalog) can't find it. Same path the sprites use.
     private static let flame: NSImage? = {
-        guard let url = Bundle.module.url(forResource: "streak-fire",
-                                          withExtension: "png",
-                                          subdirectory: "Resources"),
+        guard let url = BundledArt.url("streak-fire"),
               let image = NSImage(contentsOf: url)
         else { return nil }
         return image

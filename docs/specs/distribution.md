@@ -43,8 +43,11 @@ What the script does:
    (`LSUIElement`, `LSMinimumSystemVersion 14.0`, bundle id `sh.micky.merly`).
 2. **Repacks the SwiftPM resource bundle.** SwiftPM emits a *flat* bundle
    (`Resources/`, no `Info.plist`), which `codesign` rejects as "bundle format
-   unrecognized". The script rebuilds it in standard `Contents/` layout;
-   `Bundle.module` still resolves from `Contents/Resources` at runtime.
+   unrecognized". The script rebuilds it in standard `Contents/` layout at
+   `Merly.app/Contents/Resources/Merly_Merly.bundle`, keeping its `Resources/`
+   folder. `BundledArt` loads it from there. `Bundle.module` alone would not
+   find it: it checks only the `.app` root and the absolute `.build` path baked
+   in at compile time, so the installed app crashed once that checkout was gone.
 3. **Signs ad-hoc** (`codesign --force --sign -`), since no Developer ID exists.
    Apple Silicon refuses to execute an entirely unsigned binary, so this is
    required, not cosmetic.

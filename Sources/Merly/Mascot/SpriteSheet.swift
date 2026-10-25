@@ -46,7 +46,7 @@ enum SpriteSheetStore {
     /// safe to call from any thread (used to pick an evolution form sheet and
     /// degrade gracefully when its art isn't bundled yet).
     nonisolated static func exists(_ name: String) -> Bool {
-        Bundle.module.url(forResource: name, withExtension: "png", subdirectory: "Resources") != nil
+        BundledArt.url(name) != nil
     }
 
     /// Resolve the sprite sheet for an evolution `form` (0 = base), stepping down
@@ -64,8 +64,7 @@ enum SpriteSheetStore {
     }
 
     nonisolated private static func load(name: String, cols: Int) -> SpriteSheet? {
-        guard let url = Bundle.module.url(forResource: name, withExtension: "png",
-                                          subdirectory: "Resources"),
+        guard let url = BundledArt.url(name),
               let src = CGImageSourceCreateWithURL(url as CFURL, nil),
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil)
         else { return nil }

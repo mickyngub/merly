@@ -41,19 +41,22 @@ cp "$BIN" "$APP/Contents/MacOS/Merly"
 [ -f "scripts/Merly.icns" ] || uv run scripts/make-icon.py
 cp "scripts/Merly.icns" "$APP/Contents/Resources/Merly.icns"
 
-# Bundled resources (sprite sheets). Bundle.module resolves this next to the binary.
-NESTED="$APP/Contents/MacOS/Merly_Merly.bundle"
-cp -R ".build/release/Merly_Merly.bundle" "$APP/Contents/MacOS/" 2>/dev/null \
+# Bundled resources (sprite sheets). BundledArt finds them here via
+# Bundle.main.resourceURL. Bundle.module alone would not: it checks only the .app
+# root and the absolute .build path baked into the binary, so the installed app
+# would crash as soon as this checkout went away.
+NESTED="$APP/Contents/Resources/Merly_Merly.bundle"
+cp -R ".build/release/Merly_Merly.bundle" "$APP/Contents/Resources/" 2>/dev/null \
   || echo "warning: Merly_Merly.bundle not found (no resources?)"
 
 # SwiftPM emits a FLAT resource bundle (Resources/ + no Info.plist), which
 # codesign refuses to seal ("bundle format unrecognized"). Repack it into a
-# standard Contents/ bundle layout so it can be signed and notarized. Bundle.module
-# still resolves resources from Contents/Resources at runtime.
+# standard Contents/ bundle layout so it can be signed and notarized. The
+# Resources/ folder moves in whole: the code looks resources up with
+# subdirectory "Resources", relative to the bundle's resource dir.
 if [ -d "$NESTED" ] && [ ! -f "$NESTED/Contents/Info.plist" ]; then
   mkdir -p "$NESTED/Contents/Resources"
-  [ -d "$NESTED/Resources" ] && mv "$NESTED"/Resources/* "$NESTED/Contents/Resources/" 2>/dev/null || true
-  rmdir "$NESTED/Resources" 2>/dev/null || true
+  [ -d "$NESTED/Resources" ] && mv "$NESTED/Resources" "$NESTED/Contents/Resources/"
   cat > "$NESTED/Contents/Info.plist" <<'BPLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
