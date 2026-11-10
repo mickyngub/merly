@@ -186,10 +186,13 @@ final class ProviderCompatibilityTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: target + ".lock"))
     }
 
-    private func credentials(access: String = "old-access", refresh: String = "old-refresh", expires: TimeInterval = 0) throws -> URL {
+    private func credentials(
+        access: String = "old-access", refresh: String = "old-refresh", expires: TimeInterval = 0,
+        slot: String = "kimi-code"
+    ) throws -> URL {
         let folder = directory.appendingPathComponent("credentials")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent("kimi-code.json")
+        let url = folder.appendingPathComponent("\(slot).json")
         try JSONSerialization.data(withJSONObject: [
             "access_token": access, "refresh_token": refresh, "expires_at": expires,
         ]).write(to: url)
@@ -215,7 +218,7 @@ final class ProviderCompatibilityTests: XCTestCase {
         _ = try credentials(access: "", refresh: "")
         XCTAssertThrowsError(try KimiUsageAPI.freshAccessToken(configDir: directory.path) { _ in
             XCTFail("Revoked credentials must not make a token request"); return [:]
-        }) { XCTAssertTrue($0.isAuthLapse) }
+        }) { XCTAssertTrue($0.isAuthLapse); XCTAssertFalse($0.isExpiredLogin) }
         _ = try credentials()
         let folder = directory.appendingPathComponent("oauth")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -241,6 +244,84 @@ final class ProviderCompatibilityTests: XCTestCase {
         let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         XCTAssertEqual(saved["refresh_token"] as? String, "winner-refresh")
         XCTAssertTrue(FileManager.default.fileExists(atPath: target + ".lock"))
+    }
+
+    func testKimiRejectedRefreshNeedsSignInAndKeepsCredentials() throws {
+        let url = try credentials()
+        let original = try Data(contentsOf: url)
+        XCTAssertThrowsError(try KimiUsageAPI.freshAccessToken(configDir: directory.path) { _ in
+            throw ProviderAPIError.http(401)
+        }) { XCTAssertTrue($0.isAuthLapse); XCTAssertFalse($0.isExpiredLogin) }
+        XCTAssertEqual(try Data(contentsOf: url), original)
+    }
+
+    private func kimiFile(_ name: String, _ text: String) throws {
+        try Data(text.utf8).write(to: directory.appendingPathComponent(name))
+    }
+
+    func testKimiSlotFollowsTheCLIsRegionResolution() throws {
+        let global = "kimi-code-env-0e4f99c69cc27850"
+        XCTAssertEqual(KimiUsageAPI.Region.global.slotName, global)
+
+        let fresh = KimiUsageAPI.slot(configDir: directory.path)
+        XCTAssertEqual(fresh, .init(name: "kimi-code", region: .mainland))
+        XCTAssertEqual(fresh.tokenEndpoint.absoluteString, "https://auth.kimi.com/api/oauth/token")
+        XCTAssertEqual(fresh.usageEndpoint.absoluteString, "https://api.kimi.com/coding/v1/usages")
+
+        try kimiFile("region", "global\n")
+        let marked = KimiUsageAPI.slot(configDir: directory.path)
+        XCTAssertEqual(marked, .init(name: global, region: .global))
+        XCTAssertEqual(marked.tokenEndpoint.absoluteString, "https://auth.kimi.ai/api/oauth/token")
+        XCTAssertEqual(marked.usageEndpoint.absoluteString, "https://api.kimi.ai/coding/v1/usages")
+
+        try kimiFile("config.toml", """
+        [providers."managed:kimi-code"]
+        base_url = "https://api.kimi.com/coding/v1"
+
+        [providers."managed:kimi-code".oauth]
+        storage = "file"
+        key = "oauth/kimi-code"
+        """)
+        XCTAssertEqual(KimiUsageAPI.slot(configDir: directory.path), .init(name: "kimi-code", region: .mainland))
+
+        try kimiFile("region", "cn\n")
+        try kimiFile("config.toml", """
+        [providers."managed:kimi-code"]
+        oauth = { storage = "file", key = "oauth/\(global)", oauth_host = "https://auth.kimi.ai/" }
+        """)
+        XCTAssertEqual(KimiUsageAPI.slot(configDir: directory.path), .init(name: global, region: .global))
+    }
+
+    func testKimiGlobalLoginRefreshesAndPersistsItsOwnSlot() throws {
+        let slot = KimiUsageAPI.Region.global.slotName
+        try kimiFile("region", "global")
+        let mainland = try credentials(access: "mainland-access", refresh: "mainland-refresh")
+        let mainlandBefore = try Data(contentsOf: mainland)
+        let url = try credentials(slot: slot)
+        let token = try KimiUsageAPI.freshAccessToken(configDir: directory.path) { form in
+            XCTAssertEqual(form["refresh_token"], "old-refresh")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: self.directory.path + "/oauth/\(slot).lock"))
+            return ["access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 900]
+        }
+        XCTAssertEqual(token, "new-access")
+        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        XCTAssertEqual(saved["refresh_token"] as? String, "new-refresh")
+        XCTAssertEqual(try Data(contentsOf: mainland), mainlandBefore)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path + "/oauth/\(slot).lock"))
+    }
+
+    func testThirtyDayPrimaryIsMonthlyNotWeekly() {
+        XCTAssertEqual(LimitWindow.name(seconds: 2_592_000), "Monthly")
+        XCTAssertEqual(LimitWindow.name(seconds: 604_800), "Weekly")
+        let config = ProviderConfig(id: "codex", name: "Codex", account: "Free", kind: .codex, dir: directory.path)
+        var snapshot = ProviderSnapshot(
+            config: config, sessionPct: 3, sessionResetAt: nil, weekly: [],
+            isActive: false, isEstimated: false, primaryWindowLabel: nil, note: nil
+        )
+        snapshot.sessionWindowSeconds = 2_592_000
+        XCTAssertTrue(snapshot.hasMonthlyPrimary)
+        XCTAssertFalse(snapshot.hasSessionWindow)
+        XCTAssertEqual(snapshot.iconGauges.map(\.window), ["mo"])
     }
 
     func testKimiLostLockWithoutDiskWinnerPreservesCredentialsAndFails() throws {

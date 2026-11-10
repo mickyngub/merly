@@ -30,6 +30,12 @@ enum LimitWindow {
     /// it's named "3d" while still classified weekly by `isWeekly`.
     static let weeklyNameSeconds: Double = 144 * 3600
 
+    /// Codex's free plan budgets per 30 days; anything a calendar month long is
+    /// "Monthly", never "Weekly".
+    static let monthlyNameSeconds: Double = 28 * 86400
+
+    static func isMonthly(name: String) -> Bool { name.hasPrefix("Monthly") }
+
     /// A window at or past this span is a standing budget rather than a rolling
     /// session. Drives the ring's lane order and the card's "what's blocking
     /// you" wording (see `isWeekly`).
@@ -40,6 +46,7 @@ enum LimitWindow {
     /// primary window was before Codex changed.
     static func name(seconds: Double?) -> String {
         guard let seconds, seconds > 0 else { return "5h" }
+        if seconds >= monthlyNameSeconds { return "Monthly" }
         if seconds >= weeklyNameSeconds { return "Weekly" }
         let hours = seconds / 3600
         if seconds >= standingBudgetSeconds { return "\(Int((hours / 24).rounded()))d" }
@@ -233,7 +240,7 @@ struct ProviderSnapshot: Identifiable, Equatable {
     /// What to call the primary window: "5h" for a rolling session, "Weekly" for a
     /// provider like Codex whose primary limit spans 7 days.
     var primaryWindowName: String { primaryWindowLabel ?? LimitWindow.name(seconds: sessionWindowSeconds) }
-    var hasMonthlyPrimary: Bool { primaryWindowName == "Monthly total" || primaryWindowName == "Monthly code" }
+    var hasMonthlyPrimary: Bool { LimitWindow.isMonthly(name: primaryWindowName) }
 
     /// True when the primary window is short enough to be a "current session".
     var hasSessionWindow: Bool { !hasMonthlyPrimary && !LimitWindow.isWeekly(seconds: sessionWindowSeconds) }
@@ -452,7 +459,7 @@ enum UsageFormatting {
     /// What's standing between you and the next request, for the clock line. Kept
     /// short enough to sit on one line beside the mascot and the ring.
     static func blockingText(_ blocking: WeeklyMetric, now: Date) -> String {
-        let word = blocking.label == "Monthly total" || blocking.label == "Monthly code"
+        let word = LimitWindow.isMonthly(name: blocking.label)
             ? "Monthly" : blocking.isWeekly ? "Weekly" : "5h cap"
         // Terse because the wider nested ring leaves this line ~136pt; the clock
         // glyph beside it already supplies "resets".

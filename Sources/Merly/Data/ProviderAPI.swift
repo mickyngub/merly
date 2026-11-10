@@ -7,10 +7,11 @@
 //  codex  — ~/.codex/auth.json holds a ChatGPT OAuth token. GET
 //           chatgpt.com/backend-api/wham/usage returns primary (5h) and
 //           secondary (weekly) windows plus per-model additional limits.
-//  kimi   — ~/.kimi-code/credentials/kimi-code.json holds a 15-minute access
-//           token + refresh token. We refresh exactly like the CLI does
-//           (flock on oauth/kimi-code, POST auth.kimi.com/api/oauth/token,
-//           persist rotated creds), then GET api.kimi.com/coding/v1/usages.
+//  kimi   — ~/.kimi-code/credentials/<slot>.json holds a 15-minute access
+//           token + refresh token, where the slot and hosts depend on the
+//           login's region (kimi.com or kimi.ai). We refresh exactly like the
+//           CLI does (locks on oauth/<slot>, POST <auth host>/api/oauth/token,
+//           persist rotated creds), then GET <api host>/coding/v1/usages.
 //
 // Every fetch here can fail (expired login, offline, schema drift) — readers
 // fall back to local token-count estimation.
@@ -253,7 +254,9 @@ enum ClaudeUsageAPI {
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { throw ProviderAPIError.noCredentials("keychain \(service)") }
         let oauth = (root["claudeAiOauth"] as? [String: Any]) ?? root
-        guard let token = oauth["accessToken"] as? String else {
+        // Logging out keeps the keychain item but blanks its tokens, so an empty
+        // token means signed out, not merely expired.
+        guard let token = oauth["accessToken"] as? String, !token.isEmpty else {
             throw ProviderAPIError.noCredentials("keychain \(service)")
         }
 
@@ -425,13 +428,116 @@ enum KimiUsageAPI {
     }
 
     private static let clientId = "17e5f671-d194-4dfb-9706-5516cb48c098"
-    static let usageEndpoint = URL(string: "https://api.kimi.com/coding/v1/usages")!
-    static let tokenEndpoint = URL(string: "https://auth.kimi.com/api/oauth/token")!
+
+    /// The CLI's two official deployments. A login belongs to exactly one, and its
+    /// tokens are only good against that deployment's hosts.
+    enum Region: String {
+        case mainland = "mainland-cn"
+        case global
+
+        var oauthHost: String {
+            switch self {
+            case .mainland: "https://auth.kimi.com"
+            case .global: "https://auth.kimi.ai"
+            }
+        }
+
+        var baseURL: String {
+            switch self {
+            case .mainland: "https://api.kimi.com/coding/v1"
+            case .global: "https://api.kimi.ai/coding/v1"
+            }
+        }
+
+        /// Mirrors the CLI's `resolveKimiCodeOAuthKey`: the mainland pair keeps the
+        /// historical `kimi-code` name, every other pair gets a hashed `env` slot.
+        var slotName: String {
+            if self == .mainland { return "kimi-code" }
+            let identity = #"{"oauthHost":"\#(oauthHost)","baseUrl":"\#(baseURL)"}"#
+            let digest = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+            return "kimi-code-env-\(digest.prefix(16))"
+        }
+
+        init?(oauthHost: String) {
+            let host = oauthHost.trimmingCharacters(in: .whitespaces)
+                .replacingOccurrences(of: #"/+$"#, with: "", options: .regularExpression)
+            guard let match = [Region.mainland, .global].first(where: { $0.oauthHost == host }) else { return nil }
+            self = match
+        }
+    }
+
+    /// One CLI login: the files the CLI keeps it in and the hosts that accept it.
+    struct Slot: Equatable {
+        var name: String
+        var region: Region
+
+        var tokenEndpoint: URL { URL(string: region.oauthHost + "/api/oauth/token")! }
+        var usageEndpoint: URL { URL(string: region.baseURL + "/usages")! }
+    }
+
+    /// Resolves the login the CLI is using, in the CLI's own order: the host saved
+    /// with the login, then the historical mainland key, then the install's region
+    /// marker, then mainland. Merly only ever talks to the two official hosts, so a
+    /// custom environment keeps its slot name but cannot refresh.
+    static func slot(configDir: String) -> Slot {
+        let toml = (try? String(contentsOfFile: configDir + "/config.toml", encoding: .utf8)) ?? ""
+        let ref = configuredOAuthRef(toml: toml)
+        let marker = (try? String(contentsOfFile: configDir + "/region", encoding: .utf8))
+            .flatMap { Region(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        let region = ref.oauthHost.flatMap(Region.init(oauthHost:))
+            ?? (ref.key == "oauth/kimi-code" ? .mainland : nil)
+            ?? marker
+            ?? .mainland
+        let configuredName = ref.key.flatMap { key -> String? in
+            guard key.hasPrefix("oauth/") else { return nil }
+            let name = String(key.dropFirst("oauth/".count))
+            return name.isEmpty || name.contains("/") || name.hasPrefix(".") ? nil : name
+        }
+        return Slot(name: configuredName ?? region.slotName, region: region)
+    }
+
+    /// The `oauth` ref of the CLI's managed provider in `config.toml`, as either a
+    /// `[providers."managed:kimi-code".oauth]` table or an inline table.
+    static func configuredOAuthRef(toml: String) -> (key: String?, oauthHost: String?) {
+        let provider = #"providers."managed:kimi-code""#
+        let assignment = try! NSRegularExpression(pattern: #"(\w+)\s*=\s*"([^"]*)""#)
+        var table = ""
+        var key: String?
+        var host: String?
+        for raw in toml.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("#") { continue }
+            if line.hasPrefix("[") {
+                table = line.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+                continue
+            }
+            let scope: Substring
+            if table == provider + ".oauth" {
+                scope = Substring(line)
+            } else if table == provider, line.hasPrefix("oauth"), let open = line.firstIndex(of: "{") {
+                scope = line[open...]
+            } else {
+                continue
+            }
+            let text = String(scope)
+            for match in assignment.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                guard let name = Range(match.range(at: 1), in: text),
+                      let value = Range(match.range(at: 2), in: text) else { continue }
+                switch text[name] {
+                case "key": key = String(text[value])
+                case "oauth_host", "oauthHost": host = String(text[value])
+                default: break
+                }
+            }
+        }
+        return (key, host)
+    }
 
     static func fetch(configDir: String) throws -> Usage {
-        let token = try freshAccessToken(configDir: configDir)
+        let slot = slot(configDir: configDir)
+        let token = try freshAccessToken(configDir: configDir, slot: slot)
         let obj = try HTTP.request(
-            usageEndpoint,
+            slot.usageEndpoint,
             headers: ["Authorization": "Bearer \(token)"],
             classifyFailure: classifyUsageFailure
         )
@@ -532,12 +638,13 @@ enum KimiUsageAPI {
 
     static func freshAccessToken(
         configDir: String,
-        refresh: ([String: String]) throws -> [String: Any] = {
-            try HTTP.request(KimiUsageAPI.tokenEndpoint, method: "POST", formBody: $0)
-        }
+        slot: Slot? = nil,
+        refresh: (([String: String]) throws -> [String: Any])? = nil
     ) throws -> String {
-        let credsURL = URL(fileURLWithPath: configDir).appendingPathComponent("credentials/kimi-code.json")
-        let lockPath = configDir + "/oauth/kimi-code"
+        let slot = slot ?? Self.slot(configDir: configDir)
+        let refresh = refresh ?? { try HTTP.request(slot.tokenEndpoint, method: "POST", formBody: $0) }
+        let credsURL = URL(fileURLWithPath: configDir).appendingPathComponent("credentials/\(slot.name).json")
+        let lockPath = configDir + "/oauth/\(slot.name)"
 
         /// The raw credential dict plus its access token, typed at the one place
         /// the shape is checked — so no later call site has to force-cast.
@@ -545,9 +652,11 @@ enum KimiUsageAPI {
             guard let data = try? Data(contentsOf: credsURL),
                   let creds = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let token = creds["access_token"] as? String
-            else { throw ProviderAPIError.noCredentials("credentials/kimi-code.json") }
+            else { throw ProviderAPIError.noCredentials("credentials/\(slot.name).json") }
+            // The CLI blanks the token when the server rejects the login, and then
+            // only a fresh sign-in helps.
             guard !token.isEmpty else {
-                throw ProviderAPIError.expiredToken("Kimi credentials were revoked — run kimi to re-auth")
+                throw ProviderAPIError.noCredentials("Kimi login was revoked")
             }
             return (creds, token)
         }
@@ -580,7 +689,7 @@ enum KimiUsageAPI {
                 return accessToken
             }
             guard let refreshToken = creds["refresh_token"] as? String, !refreshToken.isEmpty else {
-                throw ProviderAPIError.expiredToken("no refresh token — run kimi to re-auth")
+                throw ProviderAPIError.noCredentials("no Kimi refresh token")
             }
 
             let tok: [String: Any]
@@ -593,10 +702,9 @@ enum KimiUsageAPI {
                     ])
             } catch let ProviderAPIError.http(code) where (400..<500).contains(code) && code != 429 {
                 // A 4xx on a refresh_token grant means the grant itself is dead
-                // (OAuth `invalid_grant` — the login lapsed, often because the CLI
-                // re-authed elsewhere and rotated the token). Surface it as an auth
-                // lapse so the card says "sign in again" instead of a cryptic 400.
-                throw ProviderAPIError.expiredToken("refresh rejected (\(code)) — run kimi to re-auth")
+                // (OAuth `invalid_grant`). We refresh under the CLI's own lock, so
+                // this is never a lost race: the CLI also needs a fresh sign-in.
+                throw ProviderAPIError.noCredentials("Kimi refused the refresh (\(code))")
             }
             guard let access = tok["access_token"] as? String, !access.isEmpty else {
                 throw ProviderAPIError.expiredToken("refresh rejected — run kimi to re-auth")

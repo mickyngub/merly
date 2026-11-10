@@ -2,9 +2,9 @@
 
 How Merly obtains **real, provider-reported** rate limits — the same numbers as Claude's `/usage` screen, Codex Analytics, and the Kimi Console. This is the load-bearing knowledge for adding providers or debugging auth; the parsing lives in `Sources/Merly/Data/ProviderAPI.swift`, the orchestration in `Readers.swift`.
 
-Everything here was reverse-engineered from the installed CLIs, last re-verified against live responses on **2026-09-05** (Claude Code 2.1.258, Codex CLI 0.152.1, Kimi Code 0.37.2). Endpoints and payload shapes can drift — when something breaks, re-derive from the binaries (see [Re-deriving from the CLIs](#re-deriving-from-the-clis)).
+Everything here was reverse-engineered from the installed CLIs. Claude and Codex were last re-verified against live responses on **2026-11-10** (Claude Code 2.1.322, Codex CLI 0.167.0). Endpoints and payload shapes can drift — when something breaks, re-derive from the binaries (see [Re-deriving from the CLIs](#re-deriving-from-the-clis)).
 
-Kimi compatibility was additionally checked against the [official 2.2.0 release](https://github.com/MoonshotAI/kimi-code/releases/tag/%40moonshot-ai%2Fkimi-code%402.2.0) source on **2026-10-18**. This was a source and fixture check, not a live authenticated API probe.
+Kimi was last checked against the `@moonshot-ai/kimi-code` **2.5.3** npm source on **2026-11-10** (earlier: 2.2.0 on 2026-10-18, live 0.37.2 on 2026-09-05). That was a source and fixture check, not a live authenticated probe: the test account's login has lapsed.
 
 ## Design: API-first, with cache + estimate fallback
 
@@ -65,6 +65,8 @@ The returned blob is JSON. Tokens may be nested under `claudeAiOauth` or flat:
 
 **Never refresh this token.** If `expiresAt` is past, throw `expiredToken` and fall back — let the user's own `claude` re-auth. Racing Claude Code's refresh risks invalidating its session.
 
+**Logging out blanks the item instead of deleting it** (Claude Code 2.1.322): `accessToken` and `refreshToken` become `""` and `expiresAt` becomes `0`, while `refreshTokenExpiresAt`, the plan fields and `mcpOAuth` stay. An empty token is `noCredentials` ("Signed out"), not `expiredToken`, because running a command cannot bring it back. Live items now also carry `refreshTokenExpiresAt` and `subscriptionTypeSource`; Merly reads neither.
+
 **Endpoint:** `GET https://api.anthropic.com/api/oauth/usage`
 **Headers:** `Authorization: Bearer <accessToken>`, `anthropic-beta: oauth-2025-04-20`
 
@@ -92,6 +94,8 @@ The returned blob is JSON. Tokens may be nested under `claudeAiOauth` or flat:
 ```
 
 Shape as of 2026-09-05. Newer than the June payload: per-window `*_dollars` / `locked_reason`, `severity` + `is_active` on each `limits[]` row, `scope.surface`, the `spend` block, and a churn of codenamed experiment buckets at the top level (`nimbus_quill`, `tangelo`, …). None of it is load-bearing for Merly; the decoder only reads `five_hour`, `seven_day`, and `limits[]`. Claude Code itself now calls `/api/oauth/usage?at_wall=1&skip_spend=1` when it hits a limit and filters `weekly_scoped` rows by a remote-config model allowlist, titling them "Current week (Fable)"; it ignores `is_active` too, so a 0% scoped row with `resets_at: null` is a normal idle state, not drift.
+
+As of 2026-11-10 the payload adds `weekly_scoped_shares` (`limit_index`, `used_percent_of_weekly`, `allowance_percent_of_weekly`: the Fable cap is 50% of the weekly budget), `seven_day_breakdown`, `pace`, `indicator`, richer `extra_usage` fields and still more codenamed buckets. All three decoded keys are unchanged.
 
 - `utilization` is already a percentage (0–100). `resets_at` is ISO 8601 with **microsecond** precision + offset — trim to milliseconds before `ISO8601DateFormatter` (`parseAPIDate` does this).
 - Mapping: `five_hour` → session ring; `seven_day` → "All models" weekly bar.
@@ -147,7 +151,9 @@ Shape as of 2026-09-05. Newer than the June payload: per-window `*_dollars` / `l
 
 Shape as of 2026-09-05. Newer than the June payload: `reset_after_seconds` beside `reset_at`, `code_review_rate_limit`, `model_usage`, `spend_control`, `rate_limit_reached_type`, `promo`, and `normal_model_slug` on additional limits. Merly reads none of them; the decoder's keys (`rate_limit.*_window`, `additional_rate_limits[]`, `plan_type`, `rate_limit_reset_credits`) are all still present. The binary (now at `/opt/homebrew/Caskroom/codex/<ver>/bin/codex`) still names `/wham/usage` alongside `/api/codex/usage`.
 
-- `primary_window` → the primary limit, **whatever its span**: as of Aug 2026 this account reports `limit_window_seconds: 604800` with `secondary_window: null`, i.e. the primary *is* the weekly budget. Never assume 5h from the field name (see `LimitWindow`).
+Re-checked 2026-11-10 against CLI 0.167.0: same endpoint and keys. `additional_rate_limits` can now be `null` rather than `[]`, and `promo` can be an object (`campaign_id`, `message`). Auth still lives in `auth.json`; `cli_auth_credentials_store = "keyring"` would move it to the keychain, which Merly does not read.
+
+- `primary_window` → the primary limit, **whatever its span**: as of Aug 2026 this account reports `limit_window_seconds: 604800` with `secondary_window: null`, i.e. the primary *is* the weekly budget. A **free** plan reports `2592000` (30 days), named "Monthly" (`LimitWindow.monthlyNameSeconds`, 28 days) and drawn as the `mo` lane. Never assume 5h from the field name (see `LimitWindow`).
 - `used_percent` is a plain number; `reset_at` is **epoch seconds** (not ISO). `parseAPIDate` handles both.
 - `additional_rate_limits[]` become extra weekly/5h bars labeled by `limit_name` (capped at 4 total).
 - `plan_type` → plan label via a lookup, not `.capitalized` ("prolite" is the rate-limited Pro tier → "Pro (5x)").
@@ -159,7 +165,14 @@ Shape as of 2026-09-05. Newer than the June payload: `reset_after_seconds` besid
 
 ## Kimi  (`kind: kimi`)  — the tricky one
 
-**Credentials — `~/.kimi-code/credentials/kimi-code.json`:**
+**Credentials — `~/.kimi-code/credentials/<slot>.json`.** Since 2.5 the CLI has two official regions, and a login's slot and hosts follow its region (`KimiUsageAPI.slot(configDir:)`):
+
+| Region | Slot | OAuth host | Usage endpoint |
+|---|---|---|---|
+| `mainland-cn` (kimi.com, the default) | `kimi-code` | `https://auth.kimi.com` | `https://api.kimi.com/coding/v1/usages` |
+| `global` (kimi.ai) | `kimi-code-env-0e4f99c69cc27850` | `https://auth.kimi.ai` | `https://api.kimi.ai/coding/v1/usages` |
+
+The global slot name is the CLI's `resolveKimiCodeOAuthKey`: `kimi-code-env-` + the first 16 hex of `sha256('{"oauthHost":"https://auth.kimi.ai","baseUrl":"https://api.kimi.ai/coding/v1"}')`. The region resolves in the CLI's order, minus its environment overrides: the `oauth_host` saved with the login in `config.toml` (`[providers."managed:kimi-code".oauth]`), then a saved key of `oauth/kimi-code` (mainland), then the `region` marker file (`mainland-cn` or `global`; anything else is ignored), then mainland. The slot name comes from that saved `key` (`oauth/<slot>`) when present. Custom environments and `storage = "keyring"` logins are not supported: Merly only talks to the two official hosts and only reads credential files.
 
 ```jsonc
 { "access_token": "...", "refresh_token": "...", "expires_at": 1781166713,  // epoch SECONDS
@@ -171,9 +184,9 @@ Shape as of 2026-09-05. Newer than the June payload: `reset_after_seconds` besid
 Coordinate with both supported CLI lock protocols (`KimiUsageAPI.freshAccessToken`):
 
 1. If `expires_at > now + 60`, use the cached `access_token` — no refresh.
-2. Otherwise acquire a nonblocking **exclusive `flock`** on `~/.kimi-code/oauth/kimi-code` for older clients, and atomically create the newer CLI's `oauth/kimi-code.lock` directory. Keep its modification time fresh while the request runs; current Kimi uses `proper-lockfile` with a five-second stale threshold. Contention fails closed. Merly never removes another owner's lock, including an abandoned one; the CLI handles stale-lock recovery.
+2. Otherwise acquire a nonblocking **exclusive `flock`** on `~/.kimi-code/oauth/<slot>` for older clients, and atomically create the newer CLI's `oauth/<slot>.lock` directory. Keep its modification time fresh while the request runs; current Kimi uses `proper-lockfile` with a five-second stale threshold. Contention fails closed. Merly never removes another owner's lock, including an abandoned one; the CLI handles stale-lock recovery.
 3. **Re-read** the credentials under the lock — another process may have refreshed while we waited; if it's now fresh, use it.
-4. `POST https://auth.kimi.com/api/oauth/token`, form-encoded:
+4. `POST <OAuth host>/api/oauth/token`, form-encoded (the CLI also sends `X-Msh-*` device headers; the endpoint has not required them):
    - `client_id = 17e5f671-d194-4dfb-9706-5516cb48c098`  (Kimi Code's public OAuth client id, from the binary)
    - `grant_type = refresh_token`
    - `refresh_token = <current>`
@@ -181,10 +194,10 @@ Coordinate with both supported CLI lock protocols (`KimiUsageAPI.freshAccessToke
 5. **Atomically persist** the rotated creds: write a uniquely named temporary file next to the credentials, then `replaceItemAt`. Update `access_token`, `refresh_token` (if returned), `expires_in`, and recompute `expires_at = now + expires_in`.
 6. Stop the heartbeat and release only locks still owned by this operation. If ownership is lost after a token grant, adopt a fresh credential already written by the CLI when possible; otherwise report a coordination failure without overwriting another writer. A compromised lock can still require signing in again.
 
-Merly uses the default mainland OAuth host, `https://auth.kimi.com`. The CLI's global/custom endpoint pairs and their `kimi-code-env-<hash>.json` credential slots are not currently supported; the CLI's host overrides do not change Merly's endpoints.
+A refresh the server rejects (any 4xx but 429), a missing refresh token, and an emptied `access_token` all read as `noCredentials` ("Signed out"). Since 2.5 the CLI itself writes that emptied "tombstone" after a 401, 403 or `invalid_grant`, and then demands `/login`; running `kimi` cannot revive it.
 
-**Endpoint:** `GET https://api.kimi.com/coding/v1/usages`
-(The CLI can override its base with `KIMI_CODE_BASE_URL`; Merly uses the default URL above.)
+**Endpoint:** `GET <usage endpoint>` from the table above
+(The CLI can override its base with `KIMI_CODE_BASE_URL`; Merly ignores that override.)
 **Headers:** `Authorization: Bearer <token>`
 
 ```jsonc
@@ -219,7 +232,7 @@ By status alone that is a transient rate limit: Merly used to show "Rate-limited
 - The CLI's parser is deliberately loose because field names drift across versions: `used` vs `remaining` (derive `used = limit - remaining`), `resetTime` vs `resetAt` vs `reset_at`. `KimiUsageAPI.window` mirrors that tolerance.
 - `membership.level` (`LEVEL_BASIC`) → plan label ("Basic").
 
-**Current usage response:** Kimi Code 2.2.0 reads `usages.limit_5h`, `limit_7d`, `limit_month_total`, and `limit_month_code`. Each reports `used_ratio` and `reset_time`. Merly supports these alongside the older `usage`/`limits` response above, promotes the shortest reported window, and keeps monthly labels distinct from weekly limits. An unrecognized response is a parse failure, never a reported zero.
+**Current usage response:** Kimi Code 2.2.0 through 2.5.3 reads `usages.limit_5h`, `limit_7d`, `limit_month_total`, and `limit_month_code`. Each reports `used_ratio` (0–1; the CLI clamps it to that range and multiplies by 100 for display) and `reset_time`. 2.5.3 no longer reads the legacy `usage`/`limits[]` shape at all. Merly supports these alongside the older `usage`/`limits` response above, promotes the shortest reported window, and keeps monthly labels distinct from weekly limits. An unrecognized response is a parse failure, never a reported zero.
 
 **Fallback:** estimate from `~/.kimi-code/sessions/wd_*/ses_*/agents/main/wire.jsonl`. Fallback estimates and usage details share `KimiUsageParser`. Both turn- and session-scoped `usage.record` events are additive; session scope includes compaction. Legacy `step.end` records remain counted unless a nearby modern record repeats the same counters within the same request boundary. Because usage records omit request IDs, pairing is conservative: matching counters within one second, without crossing a turn, step, or request start. Session-scoped usage never replaces a legacy step. Both formats carry `usage: {inputOther, output, inputCacheRead, inputCacheCreation}` and an epoch-ms `time`. The Kimi parse-cache namespace changes with this interpretation. Analytics derive the session identity above `agents`, keeping worker identity separate; legacy direct `ses_*/wire.jsonl` paths remain supported.
 
@@ -243,15 +256,16 @@ If it's Claude-Code / Codex / Kimi-compatible, just add an entry to `~/Library/A
 
 ## Re-deriving from the CLIs
 
-When an endpoint changes, the CLIs are the source of truth. Locations as of June 2026:
+When an endpoint changes, the CLIs are the source of truth. Locations as of November 2026:
 
-- **Kimi:** `~/.kimi-code/bin/kimi` — a ~170 MB bundled-JS binary (0.37.2). The original TS is embedded as `//#region ../../packages/oauth/src/<file>.ts` blocks. Grep with Python:
+- **Kimi 2.x:** the npm package `@moonshot-ai/kimi-code` ships readable bundled JS in `dist/main.mjs` (22 MB in 2.5.3), with `// ../../packages/oauth/src/<file>.ts` region comments. Download the tarball into an empty scratch dir (`pnpm view @moonshot-ai/kimi-code dist.tarball`) and grep it; never run it. `region.ts` holds the region profiles, `storage.ts` the credential files, and `resolveKimiCodeOAuthKey` the slot naming.
+- **Kimi 0.x:** `~/.kimi-code/bin/kimi` — a ~170 MB bundled-JS binary (0.37.2). The original TS is embedded as `//#region ../../packages/oauth/src/<file>.ts` blocks. Grep with Python:
   ```python
   import os; data = open(os.path.expanduser('~/.kimi-code/bin/kimi'), 'rb').read()
   i = data.find(b'packages/oauth/src/managed-usage.ts'); print(data[i:i+3800].decode('utf-8','replace'))
   ```
   Key files: `managed-usage.ts` (endpoint + `parseManagedUsagePayload` + `fetchManagedUsage`), `constants.ts` (`clientId`, `oauthHost`), `kimi-errors.ts` (the quota-exhausted wording patterns), and the `refreshAccessToken` fn (`/api/oauth/token`, flock).
-- **Codex:** `/opt/homebrew/Caskroom/codex/<ver>/bin/codex` (Rust; was `codex-aarch64-apple-darwin` in older casks). `strings | grep` for `/wham/usage`, `/api/codex/usage`, `backend-api`.
+- **Codex:** the standalone install at `~/.codex/packages/standalone/current/bin/codex` (0.167.0, linked from `~/.local/bin/codex`), which runs ahead of the Homebrew cask at `/opt/homebrew/Caskroom/codex/<ver>/bin/codex` (Rust; was `codex-aarch64-apple-darwin` in older casks). `strings | grep` for `/wham/usage`, `/api/codex/usage`, `backend-api`.
 - **Claude:** `/opt/homebrew/Caskroom/claude-code@latest/<ver>/claude` (~222 MB). Contains the usage strings (`/api/oauth/usage`, `five_hour`, `seven_day`, `weekly_scoped`); grep around `weekly_scoped` for the `limits[]` filter (`Nue()` in 2.1.258). Note the npm `cli.js` under `~/.claude/local/...` may lag and *not* contain them — prefer the Caskroom binary.
 
 Live probes (read-only except Kimi, which rotates tokens — run sparingly). For Kimi, let Merly do the refresh (`.build/debug/Merly --print`), then reuse the token it persisted while it is still fresh:

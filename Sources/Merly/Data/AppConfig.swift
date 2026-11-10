@@ -91,7 +91,7 @@ struct AppConfig: Codable {
          ["~/.codex/auth.json"]),
         (ProviderConfig(id: "kimi", name: "Kimi", account: "Moonshot",
                         kind: .kimi, dir: "~/.kimi-code", style: .round, colorSlot: 4),
-         ["~/.kimi-code/credentials/kimi-code.json"]),
+         [KimiUsageAPI.Region.mainland, .global].map { "~/.kimi-code/credentials/\($0.slotName).json" }),
     ]
 
     /// First-run discovery: keep only providers whose marker exists on disk.
