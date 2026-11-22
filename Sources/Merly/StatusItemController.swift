@@ -121,6 +121,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         MascotAnimator.shared.$frame
             .sink { [weak self] _ in MainActor.assumeIsolated { self?.renderFrame() } }
             .store(in: &cancellables)
+
+        // A full-screen space or a crowded menu bar hides the item, and then its
+        // critter is animating for nobody.
+        NotificationCenter.default
+            .publisher(for: NSWindow.didChangeOcclusionStateNotification, object: statusItem.button?.window)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.syncMenuBarAudience() } }
+            .store(in: &cancellables)
+        syncMenuBarAudience()
+    }
+
+    private func syncMenuBarAudience() {
+        let visible = statusItem.button?.window?.occlusionState.contains(.visible) ?? true
+        MascotAnimator.shared.setWatching(.menuBar, visible)
     }
 
     private func update(with snapshots: [ProviderSnapshot]) {

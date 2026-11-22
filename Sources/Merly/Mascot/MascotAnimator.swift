@@ -43,6 +43,16 @@ final class MascotAnimator: ObservableObject {
     private var tracks: [String: Track] = [:]
     private var timer: Timer?
 
+    /// The places a critter can be seen. The clock runs only while one of them is
+    /// showing and the screens are awake: every tick redraws the menu bar item,
+    /// which AppKit answers by re-snapshotting it, and that is nearly all of the
+    /// app's idle CPU. A tick nobody can see is that cost for nothing.
+    enum Audience: Hashable { case menuBar, dock, rail }
+
+    private var audiences: Set<Audience> = [.menuBar]
+    private var screensAwake = true
+    private var sessionActive = true
+
     /// Reduce Motion is answered here rather than per-view, because a critter drawn
     /// in two places must hold still in both: the menu bar has no SwiftUI
     /// environment to read it from, so a view-level check would have the panel
@@ -55,12 +65,23 @@ final class MascotAnimator: ObservableObject {
     private static let emotePool = [0, 1, 2, 3, 6, 7]
 
     private init() {
-        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
+        syncTimer()
+
+        let workspace = NSWorkspace.shared.notificationCenter
+        let power: [(Notification.Name, ReferenceWritableKeyPath<MascotAnimator, Bool>, Bool)] = [
+            (NSWorkspace.screensDidSleepNotification, \.screensAwake, false),
+            (NSWorkspace.screensDidWakeNotification, \.screensAwake, true),
+            (NSWorkspace.sessionDidResignActiveNotification, \.sessionActive, false),
+            (NSWorkspace.sessionDidBecomeActiveNotification, \.sessionActive, true),
+        ]
+        for (name, flag, value) in power {
+            workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?[keyPath: flag] = value
+                    self?.syncTimer()
+                }
+            }
         }
-        // .common so the critter keeps moving while a menu or drag holds the loop.
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
 
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
@@ -78,6 +99,27 @@ final class MascotAnimator: ObservableObject {
                 }
             }
         }
+    }
+
+    func setWatching(_ audience: Audience, _ watching: Bool) {
+        if watching { audiences.insert(audience) } else { audiences.remove(audience) }
+        syncTimer()
+    }
+
+    private func syncTimer() {
+        guard screensAwake, sessionActive, !audiences.isEmpty else {
+            timer?.invalidate()
+            timer = nil
+            return
+        }
+        guard timer == nil else { return }
+        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        timer.tolerance = 0.02
+        // .common so the critter keeps moving while a menu or drag holds the loop.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     /// Tell the clock what mood this key is in. Idempotent and cheap — call it on

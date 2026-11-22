@@ -267,7 +267,7 @@ final class PanelController: NSObject {
         panelState.openGeneration += 1
         engine.refresh()
 
-        panelState.dockMounted = true
+        mountDock(true)
         panel.setFrame(panelFrame(onScreen: false), display: false)
         panel.alphaValue = 1
         panel.orderFrontRegardless()
@@ -284,7 +284,7 @@ final class PanelController: NSObject {
             slide(panel, to: panelFrame(onScreen: false), duration: 0.4) { [weak self] in
                 guard let self, self.state == .hidden else { return }
                 self.panel.orderOut(nil)
-                self.panelState.dockMounted = false
+                self.mountDock(false)
             }
         }
     }
@@ -295,7 +295,7 @@ final class PanelController: NSObject {
         slide(panel, to: panelFrame(onScreen: false), duration: 0.4) { [weak self] in
             guard let self, self.state == .rail else { return }
             self.panel.orderOut(nil)
-            self.panelState.dockMounted = false
+            self.mountDock(false)
         }
         // The rail comes back where it was last dropped, not where it was last
         // drawn — a drag that ended in a snap is the placement, and re-reading it
@@ -303,7 +303,7 @@ final class PanelController: NSObject {
         let placement = self.placement
         panelState.railEdge = placement.edge
         // rail fades + slides in slightly behind the panel's exit (0.12s delay)
-        panelState.railMounted = true
+        mountRail(true)
         rail.setFrame(railFrame(placement, onScreen: false), display: false)
         rail.alphaValue = 0
         rail.orderFrontRegardless()
@@ -316,6 +316,16 @@ final class PanelController: NSObject {
                 self.rail.animator().setFrame(self.railFrame(placement, onScreen: true), display: true)
             }
         }
+    }
+
+    private func mountDock(_ mounted: Bool) {
+        panelState.dockMounted = mounted
+        MascotAnimator.shared.setWatching(.dock, mounted)
+    }
+
+    private func mountRail(_ mounted: Bool) {
+        panelState.railMounted = mounted
+        MascotAnimator.shared.setWatching(.rail, mounted)
     }
 
     private func openFromRail() {
@@ -331,7 +341,7 @@ final class PanelController: NSObject {
             Task { @MainActor in
                 guard let self, self.state != .rail else { return }
                 self.rail.orderOut(nil)
-                self.panelState.railMounted = false
+                self.mountRail(false)
             }
         })
     }
