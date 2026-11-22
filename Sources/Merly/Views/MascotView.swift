@@ -91,7 +91,7 @@ struct MascotView: View {
             .onAppear { registerWithClock() }
             .onChange(of: mood) { _, _ in registerWithClock() }
             .onChange(of: animationKey) { _, _ in registerWithClock() }
-            .onReceive(MascotAnimator.shared.$frame) { _ in
+            .onReceive(MascotAnimator.shared.ticks) { _ in
                 // The idle cycle lives in the sheet's columns, so the drawn critter
                 // takes only the flourish — it has no frames of its own to advance.
                 // (Reduce Motion is handled by the clock, which simply stops ticking.)

@@ -118,7 +118,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         // Same clock the panel's mascots read, so the critter up here and the one
         // on its card are on the same frame and the same flourish.
-        MascotAnimator.shared.$frame
+        MascotAnimator.shared.ticks
             .sink { [weak self] _ in MainActor.assumeIsolated { self?.renderFrame() } }
             .store(in: &cancellables)
 

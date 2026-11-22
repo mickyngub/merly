@@ -21,32 +21,44 @@ import Foundation
 /// tick. Untracked mascots (editor and picker previews, which are keyless) just
 /// ride the column: a preview of a chosen mood shouldn't wander off it.
 @MainActor
-final class MascotAnimator: ObservableObject {
+final class MascotAnimator {
     static let shared = MascotAnimator()
 
     /// Key for the app's own mascot — the one beside the panel title, which is
     /// nobody's provider. Provider critters key on their config id.
     static let appKey = "__app__"
 
-    /// Idle frame column, 0–3, advancing at ~5fps. Published so every mascot
-    /// redraws on the same tick.
-    @Published private(set) var frame = 0
+    /// Idle frame column, 0–3. It rests on 0 and runs one loop per burst.
+    private(set) var frame = 0
+
+    /// Fires once the column and every flourish have moved, so a subscriber that
+    /// reads them back sees the new state. `@Published` fires before the write,
+    /// which would leave each critter resting one frame short of the loop's end.
+    let ticks = PassthroughSubject<Void, Never>()
 
     private struct Track {
         var moodRow: Int
         /// A lapsed login is frozen, not idling: it holds frame 0 and never emotes.
         var animates: Bool
         var emoteRow: Int?
-        var ticksLeft: Int
+        var burstsLeft: Int
     }
 
     private var tracks: [String: Track] = [:]
     private var timer: Timer?
+    private var bursting = false
+
+    /// The critters sit still, then wiggle: one loop of the idle cycle, then rest.
+    /// A frame is not cheap up in the menu bar — AppKit re-snapshots the whole item
+    /// for every image change, about 28ms of CPU each — so a clock that never
+    /// rested cost 10–14% of a core for as long as the screen was on. One loop in
+    /// four seconds is a fifth of the frames.
+    private static let frameInterval = 0.2
+    private static let rest = 3.2
 
     /// The places a critter can be seen. The clock runs only while one of them is
-    /// showing and the screens are awake: every tick redraws the menu bar item,
-    /// which AppKit answers by re-snapshotting it, and that is nearly all of the
-    /// app's idle CPU. A tick nobody can see is that cost for nothing.
+    /// showing and the screens are awake: a tick nobody can see is that cost for
+    /// nothing.
     enum Audience: Hashable { case menuBar, dock, rail }
 
     private var audiences: Set<Audience> = [.menuBar]
@@ -56,8 +68,10 @@ final class MascotAnimator: ObservableObject {
     /// Reduce Motion is answered here rather than per-view, because a critter drawn
     /// in two places must hold still in both: the menu bar has no SwiftUI
     /// environment to read it from, so a view-level check would have the panel
-    /// freezing a track the menu bar kept thawing.
+    /// freezing a track the menu bar kept thawing. Low Power Mode holds them still
+    /// the same way: the user has asked the machine to spend less.
     private var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     /// Rows a flourish may borrow — including wink (6) and curious (7), which
     /// exist for this and nothing else. Sleeping (4) and excited (5) are states,
@@ -65,61 +79,123 @@ final class MascotAnimator: ObservableObject {
     private static let emotePool = [0, 1, 2, 3, 6, 7]
 
     private init() {
-        syncTimer()
+        syncClock()
 
         let workspace = NSWorkspace.shared.notificationCenter
-        let power: [(Notification.Name, ReferenceWritableKeyPath<MascotAnimator, Bool>, Bool)] = [
-            (NSWorkspace.screensDidSleepNotification, \.screensAwake, false),
-            (NSWorkspace.screensDidWakeNotification, \.screensAwake, true),
-            (NSWorkspace.sessionDidResignActiveNotification, \.sessionActive, false),
-            (NSWorkspace.sessionDidBecomeActiveNotification, \.sessionActive, true),
+        let power: [(name: Notification.Name, screens: Bool, on: Bool)] = [
+            (NSWorkspace.screensDidSleepNotification, true, false),
+            (NSWorkspace.screensDidWakeNotification, true, true),
+            (NSWorkspace.sessionDidResignActiveNotification, false, false),
+            (NSWorkspace.sessionDidBecomeActiveNotification, false, true),
         ]
-        for (name, flag, value) in power {
-            workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+        for change in power {
+            let (screens, on) = (change.screens, change.on)
+            workspace.addObserver(forName: change.name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?[keyPath: flag] = value
-                    self?.syncTimer()
+                    if screens { self?.screensAwake = on } else { self?.sessionActive = on }
+                    self?.syncClock()
                 }
             }
         }
 
-        NSWorkspace.shared.notificationCenter.addObserver(
+        workspace.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self else { return }
-                self.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-                if self.reduceMotion {
-                    self.frame = 0
-                    for (key, var track) in self.tracks {
-                        track.emoteRow = nil
-                        self.tracks[key] = track
-                    }
-                }
+                self?.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                self?.syncClock()
+            }
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+                self?.syncClock()
             }
         }
     }
 
     func setWatching(_ audience: Audience, _ watching: Bool) {
         if watching { audiences.insert(audience) } else { audiences.remove(audience) }
-        syncTimer()
+        syncClock()
     }
 
-    private func syncTimer() {
-        guard screensAwake, sessionActive, !audiences.isEmpty else {
+    private func syncClock() {
+        guard screensAwake, sessionActive, !audiences.isEmpty, !reduceMotion, !lowPower else {
             timer?.invalidate()
             timer = nil
+            settle()
             return
         }
         guard timer == nil else { return }
-        let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
+        startRest()
+    }
+
+    private func schedule(every interval: TimeInterval, tolerance: TimeInterval, repeats: Bool) {
+        timer?.invalidate()
+        let timer = Timer(timeInterval: interval, repeats: repeats) { [weak self] _ in
+            MainActor.assumeIsolated { self?.fired() }
         }
-        timer.tolerance = 0.02
+        timer.tolerance = tolerance
         // .common so the critter keeps moving while a menu or drag holds the loop.
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+    }
+
+    private func fired() {
+        if bursting { tick() } else { startBurst() }
+    }
+
+    private func startRest() {
+        bursting = false
+        schedule(every: Self.rest, tolerance: 0.3, repeats: false)
+    }
+
+    /// Every few bursts a track spends its loop on an off-mood row instead.
+    private func startBurst() {
+        var emoting = false
+        for (key, var track) in tracks where track.animates {
+            track.burstsLeft -= 1
+            if track.burstsLeft <= 0 {
+                track.emoteRow = Self.emotePool.filter { $0 != track.moodRow }.randomElement()
+                track.burstsLeft = Self.emoteGap()
+                emoting = true
+            }
+            tracks[key] = track
+        }
+        bursting = true
+        schedule(every: Self.frameInterval, tolerance: 0.02, repeats: true)
+        if emoting { ticks.send() }
+    }
+
+    private func tick() {
+        frame = (frame + 1) % 4
+        if frame == 0 {
+            clearEmotes()
+            startRest()
+        }
+        ticks.send()
+    }
+
+    /// Back to the resting pose, wherever the loop was.
+    private func settle() {
+        let moved = frame != 0
+        frame = 0
+        if clearEmotes() || moved { ticks.send() }
+    }
+
+    @discardableResult
+    private func clearEmotes() -> Bool {
+        var cleared = false
+        for (key, var track) in tracks where track.emoteRow != nil {
+            track.emoteRow = nil
+            tracks[key] = track
+            cleared = true
+        }
+        return cleared
     }
 
     /// Tell the clock what mood this key is in. Idempotent and cheap — call it on
@@ -131,11 +207,11 @@ final class MascotAnimator: ObservableObject {
             track.moodRow = moodRow
             track.animates = animates
             track.emoteRow = nil
-            track.ticksLeft = Self.emoteDelay()
+            track.burstsLeft = Self.emoteGap()
             tracks[key] = track
         } else {
             tracks[key] = Track(moodRow: moodRow, animates: animates,
-                                emoteRow: nil, ticksLeft: Self.emoteDelay())
+                                emoteRow: nil, burstsLeft: Self.emoteGap())
         }
     }
 
@@ -154,29 +230,8 @@ final class MascotAnimator: ObservableObject {
         return animates ? frame : 0
     }
 
-    /// One tick: advance the idle column, then age every track's flourish —
-    /// ~0.8–1.6s of an off-mood row every ~5–12s.
-    private func tick() {
-        guard !reduceMotion else { return }
-        frame = (frame + 1) % 4
-        for (key, var track) in tracks {
-            guard track.animates else { continue }
-            track.ticksLeft -= 1
-            if track.ticksLeft <= 0 {
-                if track.emoteRow != nil {
-                    track.emoteRow = nil
-                    track.ticksLeft = Self.emoteDelay()
-                } else {
-                    track.emoteRow = Self.emotePool.filter { $0 != track.moodRow }.randomElement()
-                    track.ticksLeft = Int.random(in: 4...8)
-                }
-            }
-            tracks[key] = track
-        }
-    }
-
-    /// Ticks between flourishes: 5–12s.
-    private static func emoteDelay() -> Int { Int.random(in: 25...60) }
+    /// Bursts between flourishes: one every 8–12s.
+    private static func emoteGap() -> Int { Int.random(in: 2...3) }
 
     deinit {
         // App-lifetime singleton in practice; invalidated for hygiene so a future
