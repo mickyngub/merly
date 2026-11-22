@@ -26,6 +26,13 @@ final class PanelState: ObservableObject {
     /// left of the screen into a panel on the right puts the panel nowhere near
     /// the thing that was clicked.
     @Published var dockSide: DockSide = .trailing
+    /// Whether each window's content is in its view tree. A window that is only
+    /// ordered out keeps running everything inside it — each mascot's clock tick,
+    /// the bobs and pulses, the one-second countdowns — which measured at four
+    /// fifths of the app's idle CPU with nothing on screen. So the content leaves
+    /// with the window and is rebuilt on the way back in.
+    @Published var dockMounted = false
+    @Published var railMounted = false
 }
 
 @MainActor
@@ -260,6 +267,7 @@ final class PanelController: NSObject {
         panelState.openGeneration += 1
         engine.refresh()
 
+        panelState.dockMounted = true
         panel.setFrame(panelFrame(onScreen: false), display: false)
         panel.alphaValue = 1
         panel.orderFrontRegardless()
@@ -276,6 +284,7 @@ final class PanelController: NSObject {
             slide(panel, to: panelFrame(onScreen: false), duration: 0.4) { [weak self] in
                 guard let self, self.state == .hidden else { return }
                 self.panel.orderOut(nil)
+                self.panelState.dockMounted = false
             }
         }
     }
@@ -286,6 +295,7 @@ final class PanelController: NSObject {
         slide(panel, to: panelFrame(onScreen: false), duration: 0.4) { [weak self] in
             guard let self, self.state == .rail else { return }
             self.panel.orderOut(nil)
+            self.panelState.dockMounted = false
         }
         // The rail comes back where it was last dropped, not where it was last
         // drawn — a drag that ended in a snap is the placement, and re-reading it
@@ -293,6 +303,7 @@ final class PanelController: NSObject {
         let placement = self.placement
         panelState.railEdge = placement.edge
         // rail fades + slides in slightly behind the panel's exit (0.12s delay)
+        panelState.railMounted = true
         rail.setFrame(railFrame(placement, onScreen: false), display: false)
         rail.alphaValue = 0
         rail.orderFrontRegardless()
@@ -320,6 +331,7 @@ final class PanelController: NSObject {
             Task { @MainActor in
                 guard let self, self.state != .rail else { return }
                 self.rail.orderOut(nil)
+                self.panelState.railMounted = false
             }
         })
     }
@@ -403,7 +415,11 @@ struct PanelRootView: View {
             cornerRadius: 16,
             tabOnLeading: onLeading
         )
-        DockView(engine: engine, openGeneration: panelState.openGeneration, initialScreen: panelState.initialScreen)
+        Group {
+            if panelState.dockMounted {
+                DockView(engine: engine, openGeneration: panelState.openGeneration, initialScreen: panelState.initialScreen)
+            }
+        }
         .frame(width: PanelController.panelWidth)
         .frame(maxHeight: .infinity)
         // The tab lives in this inset, so the material and border below cover the
@@ -536,14 +552,18 @@ struct RailRootView: View {
     var body: some View {
         let theme = Theme.resolve(scheme)
         let shape = railShape(panelState.railEdge)
-        RailView(
-            engine: engine,
-            edge: panelState.railEdge,
-            onExpand: onExpand,
-            onClose: onClose,
-            onDragChanged: onDragChanged,
-            onDragEnded: onDragEnded
-        )
+        Group {
+            if panelState.railMounted {
+                RailView(
+                    engine: engine,
+                    edge: panelState.railEdge,
+                    onExpand: onExpand,
+                    onClose: onClose,
+                    onDragChanged: onDragChanged,
+                    onDragEnded: onDragEnded
+                )
+            }
+        }
         .background { ZStack { VisualEffect(); theme.panelTint } }
         .clipShape(shape)
         .overlay(shape.strokeBorder(theme.panelEdge, lineWidth: 0.5))

@@ -33,11 +33,22 @@ struct DockView: View {
     let initialScreen: PanelScreen
 
     @State private var refreshSpin = 0.0
-    @State private var screen: DockScreen = .list(QAFlags.editMode ? .editing : .browsing)
+    @State private var screen: DockScreen
     @State private var drag: DragReorder?
     @State private var rowHeights: [String: CGFloat] = [:]
     @GestureState private var isReordering = false
     @Environment(\.theme) private var theme
+
+    init(engine: UsageEngine, openGeneration: Int, initialScreen: PanelScreen) {
+        _engine = ObservedObject(wrappedValue: engine)
+        self.openGeneration = openGeneration
+        self.initialScreen = initialScreen
+        _screen = State(initialValue: Self.landing(for: initialScreen))
+    }
+
+    private static func landing(for screen: PanelScreen) -> DockScreen {
+        screen == .mascot ? .mascot : .list(QAFlags.editMode ? .editing : .browsing)
+    }
 
     /// The list's inline mode, or nil when another screen is up.
     private var listMode: DockScreen.ListMode? {
@@ -85,7 +96,7 @@ struct DockView: View {
         }
         .onChange(of: openGeneration) { _, _ in
             clearDrag()
-            screen = initialScreen == .mascot ? .mascot : .list(QAFlags.editMode ? .editing : .browsing)
+            screen = Self.landing(for: initialScreen)
         }
         .onChange(of: isEditing) { _, _ in clearDrag() }
         .onChange(of: isReordering) { _, active in
